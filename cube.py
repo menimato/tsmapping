@@ -1,4 +1,5 @@
-# TODO: implement check if mosaicing is really necessary before proceeding, and adapt everything for it.
+# TODO: - implement check if mosaicing is really necessary before proceeding, and adapt everything for it.
+#       - add functions help and description.
 
 import subprocess
 from tqdm import tqdm
