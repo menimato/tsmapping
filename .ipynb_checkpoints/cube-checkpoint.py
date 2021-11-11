@@ -10,6 +10,7 @@ import pandas as pd
 import glob
 import numpy as np
 import datetime
+import gzip
 
 predefined_tiles = {'caatinga': {'number of paths': 5,
                                  'paths': {'path 1': {'key tile': '23LNL', 
@@ -34,8 +35,8 @@ predefined_tiles = {'caatinga': {'number of paths': 5,
                                                 'path 5': {'key tile': '25LBL',
                                                            'tiles': ['24LZR', '24MZS', '25MBM', '25MBN', '25MBP']}}}}
 # create cubes: all in one function
-def create_cubes(save_folder, metadata_path, bands, start_date, end_date, delete_auxiliary=True, tiles=predefined_tiles['caatinga'], interval=5, proj4 = '"+proj=aea +lat_0=-12 +lon_0=-54 +lat_1=-2 +lat_2=-22 +x_0=5000000 +y_0=10000000 +ellps=GRS80 +units=m +no_defs +type=crs"'):
-    
+def create_cubes(save_folder, metadata_path, bands, start_date, end_date, delete_auxiliary=True, tiles=predefined_tiles['caatinga'], interval=5, proj4 = '"+proj=aea +lat_0=-12 +lon_0=-54 +lat_1=-2 +lat_2=-22 +x_0=5000000 +y_0=10000000 +ellps=GRS80 +units=m +no_defs +type=crs"', clip_shapefile_path=None):
+        
     # change current folder
     os.chdir(save_folder)
     
@@ -84,35 +85,58 @@ def create_cubes(save_folder, metadata_path, bands, start_date, end_date, delete
     if delete_auxiliary:
         shutil.rmtree('./reprojected', ignore_errors=True)
         
+    # prepare for cube creation
+    past_folder = './mosaics'
+    
+    ######################
+    # crop shapefiles if it is needed
+    if clip_shapefile_path is not None:
+        print('----------------------------------------------------------', flush=True)
+        if not os.path.exists('clipped_mosaics'):
+            os.makedirs('clipped_mosaics')
+        
+        clip_shapefile(files = glob.glob('./mosaics/*.tif'), 
+                       shapefile = clip_shapefile_path, 
+                       save_folder = './clipped_mosaics')
+        
+        # delete auxiliary files if needed
+        if delete_auxiliary:
+            shutil.rmtree('./mosaics', ignore_errors=True)
+            
+        past_folder = './clipped_mosaics'
+    
     ######################
     print('----------------------------------------------------------', flush=True)
-    create_stacks(bands_folder = './mosaics', 
+    create_stacks(bands_folder = past_folder, 
                   save_folder = '.',
                   bands = bands)
     
     # delete auxiliary files if needed
     if delete_auxiliary:
-        shutil.rmtree('./mosaics', ignore_errors=True)
+        shutil.rmtree(past_folder, ignore_errors=True)
         
     print('----------------------------------------------------------\nCubes finished.')
     
     
 # download images
 def download_images(save_folder, metadata_path, bands, start_date, end_date, tiles=predefined_tiles['caatinga'], interval=5):
-    print('- Download Images -')
-    print('Loading metadata...')
+    print('- Download Images -', flush=True)
+    print('Loading metadata...', flush=True)
     
-    
-    # read the metadata
-    df = pd.read_csv(metadata_path)
-    
-    # fitler the metadata to match only the tiles needed
+    # creates list with the tiles of interest to download
     tiles_filter = []
     for i in range(1, tiles['number of paths']+1, 1):
         tiles_filter.extend([tiles['paths'][f'path {i}']['key tile']])
         tiles_filter.extend( tiles['paths'][f'path {i}']['tiles'])
-        
-    df = df[df['MGRS_TILE'].isin(tiles_filter)]
+    
+    # read the metadata in chunks
+    chunksize = 10 ** 6
+    for chunk in pd.read_csv(metadata_path, chunksize=1):
+        df = chunk[chunk['MGRS_TILE'].isin(tiles_filter)]
+        break
+    
+    for chunk in pd.read_csv(metadata_path, chunksize=chunksize):
+        df = df.append(chunk[chunk['MGRS_TILE'].isin(tiles_filter)])
     
     # starts the dates to be used
     start_date = datetime.datetime.strptime(start_date, '%Y-%m-%d')
@@ -247,6 +271,23 @@ def mosaic_bands(bands_folder, save_folder, bands, start_date, end_date, interva
     # final statement   
     print('Mosaicing finished!\n')
     
+# crop to shapefile
+def clip_shapefile(files, shapefile, save_folder):
+    print('- Clip with Shapefile -', flush=True)
+    
+    # checks save_folder's consistency
+    if save_folder[-1]=='/':
+        save_folder = save_folder[:-1]
+    
+    # iterate through files and crop them with gdal
+    for file in tqdm(files):
+        command = f'gdalwarp -co BIGTIFF=YES -co COMPRESS=PACKBITS -of GTiff -cutline {shapefile} -crop_to_cutline {file} {save_folder}/{file.split("/")[-1]}'
+        subprocess.call(command, shell=True)
+        
+    # final statement   
+    print('Clipping finished!\n')
+    
+    
 # creates the stack
 def create_stacks(bands_folder, save_folder, bands):
     print('- Creating Cubes -', flush=True)
@@ -297,3 +338,20 @@ def acquire_dates(start_date, final_date, interval):
         end_date += datetime.timedelta(days=interval)
         
     return dates
+
+# update metadata
+def update_metadata(save_folder = '.'):
+    # checks save_folder's consistency
+    if save_folder[-1]=='/':
+        save_folder = save_folder[:-1]
+    
+    # downloads the data from google cloud
+    command = f'gsutil -m cp -R gs://gcp-public-data-sentinel-2/index.csv.gz {save_folder}'
+    subprocess.call(command, shell=True)
+    
+    # extract the data
+    command = f'gzip -d {save_folder}/index.csv.gz'
+    subprocess.call(command, shell=True)
+    
+    # rename metadata file
+    os.rename(f'{save_folder}/index.csv', f'{save_folder}/Sentinel2-L1.csv')
