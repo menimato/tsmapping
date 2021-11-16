@@ -281,7 +281,7 @@ def clip_shapefile(files, shapefile, save_folder):
     
     # iterate through files and crop them with gdal
     for file in tqdm(files):
-        command = f'gdalwarp -co BIGTIFF=YES -co COMPRESS=PACKBITS -of GTiff -cutline {shapefile} -crop_to_cutline {file} {save_folder}/{file.split("/")[-1]}'
+        command = f'gdalwarp -co BIGTIFF=YES -co COMPRESS=PACKBITS -of GTiff -cutline "{shapefile}" -crop_to_cutline "{file}" "{save_folder}/{file.split("/")[-1]}"'
         subprocess.call(command, shell=True)
         
     # final statement   
