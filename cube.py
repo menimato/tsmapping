@@ -1,5 +1,8 @@
 # TODO: - implement check if mosaicing is really necessary before proceeding, and adapt everything for it.
 #       - add functions help and description.
+#       - missing dates are being filled with the previous available image
+#           - the error is happening in the mosaicing phase.
+#       - implement download from BDC.
 
 import subprocess
 from tqdm import tqdm
@@ -11,7 +14,9 @@ import glob
 import numpy as np
 import datetime
 import gzip
+import stac
 
+# to be used when downloading from gogole cloud
 predefined_tiles = {'caatinga': {'number of paths': 5,
                                  'paths': {'path 1': {'key tile': '23LNL', 
                                                            'tiles': ['23LNG','23LNH','23LNJ','23LNK','23LNL','23LPK','23LPL','23MPM']},
@@ -33,10 +38,20 @@ predefined_tiles = {'caatinga': {'number of paths': 5,
                                                                         '24LXQ', '24LXR', '24LYP', '24LYQ', '24LYR', '24LZR', '24MWS', '24MWT', '24MXS', '24MXT', 
                                                                         '24MXU', '24MXV', '24MYS', '24MYT', '24MYU', '24MYV', '24MZS', '24MZT', '24MZU', '24MZV']},
                                                 'path 5': {'key tile': '25LBL',
-                                                           'tiles': ['24LZR', '24MZS', '25MBM', '25MBN', '25MBP']}}}}
+                                                           'tiles': ['24LZR', '24MZS', '25MBM', '25MBN', '25MBP']}
+                                          }
+                                }
+                   }
+
+predefined_paths_rows = {'caatinga': {}}
+
 # create cubes: all in one function
-def create_cubes(save_folder, metadata_path, bands, start_date, end_date, delete_auxiliary=True, tiles=predefined_tiles['caatinga'], interval=5, proj4 = '"+proj=aea +lat_0=-12 +lon_0=-54 +lat_1=-2 +lat_2=-22 +x_0=5000000 +y_0=10000000 +ellps=GRS80 +units=m +no_defs +type=crs"', clip_shapefile_path=None):
-        
+def create_cubes(save_folder, bands, start_date, end_date, delete_auxiliary=True, satellite='sentinel', metadata_path=None, data_source='gcloud', grid_images=predefined_tiles['caatinga'], interval=5, proj4 = '"+proj=aea +lat_0=-12 +lon_0=-54 +lat_1=-2 +lat_2=-22 +x_0=5000000 +y_0=10000000 +ellps=GRS80 +units=m +no_defs +type=crs"', clip_shapefile_path=None):
+    
+    # before start processing...
+    if data_source=='gcloud' and metadata_path is None:
+        raise ValueError('If "gcloud" is used as data origin, then metadata_path should be given.')
+    
     # change current folder
     os.chdir(save_folder)
     
@@ -46,13 +61,13 @@ def create_cubes(save_folder, metadata_path, bands, start_date, end_date, delete
     if not os.path.exists('bands'):
         os.makedirs('bands')
 
-    download_images('./bands', 
-                    metadata_path, 
-                    bands, 
-                    start_date, 
-                    end_date, 
-                    tiles, 
-                    interval)
+    download_images_gcloud('./bands', 
+                           metadata_path, 
+                           bands, 
+                           start_date, 
+                           end_date, 
+                           grid_images, 
+                           interval)
     
     ######################
     # reproject images
@@ -118,8 +133,8 @@ def create_cubes(save_folder, metadata_path, bands, start_date, end_date, delete
     print('----------------------------------------------------------\nCubes finished.')
     
     
-# download images
-def download_images(save_folder, metadata_path, bands, start_date, end_date, tiles=predefined_tiles['caatinga'], interval=5):
+# download images from google cloud
+def download_images_gcloud(save_folder, metadata_path, bands, start_date, end_date, tiles=predefined_tiles['caatinga'], interval=5):
     print('- Download Images -', flush=True)
     print('Loading metadata...', flush=True)
     
@@ -196,10 +211,22 @@ def download_images(save_folder, metadata_path, bands, start_date, end_date, til
                         subprocess.call(command, shell=True)
                 else:
                     # spit error
-                    print(f'Tile {tile} did not have any candidate images between {start_date} and {end_date}')
+                    print(f'Tile {tile} did not have any candidate images between {start_date} and {end_date}.')
     
     # final statement   
     print('Download finished!\n')
+    
+# download images from BDC
+def download_images_BDC(acess_token, start_date, end_date, paths_rows, interval=16, collection='LC8_SR-1'):
+    
+    print('- Download Images -', flush=True)
+    
+    service = stac.STAC('https://brazildatacube.dpi.inpe.br/stac/', access_token=acess_token)
+    collection = service.collection(collection)
+    
+    db = gpd.read_file('./aux/landsat_grid.shp') # does it work even when we change the current working folder?
+    
+    
 
 # reproject the bands 
 def reproject_bands(files, save_folder, proj4 = '"+proj=aea +lat_0=-12 +lon_0=-54 +lat_1=-2 +lat_2=-22 +x_0=5000000 +y_0=10000000 +ellps=GRS80 +units=m +no_defs +type=crs"'):
