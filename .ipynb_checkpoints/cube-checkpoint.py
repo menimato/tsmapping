@@ -3,6 +3,10 @@
 #       - missing dates are being filled with the previous available image
 #           - the error is happening in the mosaicing phase.
 #       - implement download from BDC.
+#       - make sure if the problem wiht tqdm starting at the second path row persists in other runs of the code.
+#       - change the while loop in the function download_images_BDC in order to encapsulate each band instead of the 
+#         whole collection item. If some download fail, all the previously successfully downloaded bands are downloaded again.
+
 
 import subprocess
 from tqdm import tqdm
@@ -15,6 +19,10 @@ import numpy as np
 import datetime
 import gzip
 import stac
+import time
+
+# absolute path
+package_directory = os.path.dirname(os.path.abspath(__file__))
 
 # to be used when downloading from gogole cloud
 predefined_tiles = {'caatinga': {'number of paths': 5,
@@ -43,14 +51,11 @@ predefined_tiles = {'caatinga': {'number of paths': 5,
                                 }
                    }
 
+# to be used when downloading from Brazil Data Cube
 predefined_paths_rows = {'caatinga': {}}
 
-# create cubes: all in one function
-def create_cubes(save_folder, bands, start_date, end_date, delete_auxiliary=True, satellite='sentinel', metadata_path=None, data_source='gcloud', grid_images=predefined_tiles['caatinga'], interval=5, proj4 = '"+proj=aea +lat_0=-12 +lon_0=-54 +lat_1=-2 +lat_2=-22 +x_0=5000000 +y_0=10000000 +ellps=GRS80 +units=m +no_defs +type=crs"', clip_shapefile_path=None):
-    
-    # before start processing...
-    if data_source=='gcloud' and metadata_path is None:
-        raise ValueError('If "gcloud" is used as data origin, then metadata_path should be given.')
+# create sentinel cubes with images from gcloud: all in one function
+def create_cubes_gcloudSentinel(save_folder, bands, start_date, end_date, metadata_path, delete_auxiliary=True, tiles=predefined_tiles['caatinga'], interval=5, proj4 = '"+proj=aea +lat_0=-12 +lon_0=-54 +lat_1=-2 +lat_2=-22 +x_0=5000000 +y_0=10000000 +ellps=GRS80 +units=m +no_defs +type=crs"', clip_shapefile_path=None):
     
     # change current folder
     os.chdir(save_folder)
@@ -60,13 +65,13 @@ def create_cubes(save_folder, bands, start_date, end_date, delete_auxiliary=True
     print('----------------------------------------------------------', flush=True)
     if not os.path.exists('bands'):
         os.makedirs('bands')
-
-    download_images_gcloud('./bands', 
-                           metadata_path, 
-                           bands, 
-                           start_date, 
-                           end_date, 
-                           grid_images, 
+    
+    download_images_gcloud('./bands',
+                           metadata_path,
+                           bands,
+                           start_date,
+                           end_date,
+                           tiles,
                            interval)
     
     ######################
@@ -77,7 +82,8 @@ def create_cubes(save_folder, bands, start_date, end_date, delete_auxiliary=True
     
     reproject_bands(files = glob.glob('./bands/*.jp2'), 
                     save_folder = './reprojected', 
-                    proj4 = proj4)
+                    proj4 = proj4,
+                    nodata = 0)
     
     # delete auxiliary files if needed
     if delete_auxiliary:
@@ -94,7 +100,95 @@ def create_cubes(save_folder, bands, start_date, end_date, delete_auxiliary=True
                  bands = bands, 
                  start_date = start_date, 
                  end_date = end_date, 
-                 interval = interval)
+                 interval = interval,
+                 date_charsinterval_in_bandnames = [7,15],
+                 nodata = 0)
+    
+    # delete auxiliary files if needed
+    if delete_auxiliary:
+        shutil.rmtree('./reprojected', ignore_errors=True)
+        
+    # prepare for cube creation
+    past_folder = './mosaics'
+    
+    ######################
+    # crop shapefiles if it is needed
+    if clip_shapefile_path is not None:
+        print('----------------------------------------------------------', flush=True)
+        if not os.path.exists('clipped_mosaics'):
+            os.makedirs('clipped_mosaics')
+        
+        clip_shapefile(files = glob.glob('./mosaics/*.tif'), 
+                       shapefile = clip_shapefile_path, 
+                       save_folder = './clipped_mosaics')
+        
+        # delete auxiliary files if needed
+        if delete_auxiliary:
+            shutil.rmtree('./mosaics', ignore_errors=True)
+            
+        past_folder = './clipped_mosaics'
+    
+    ######################
+    print('----------------------------------------------------------', flush=True)
+    create_stacks(bands_folder = past_folder, 
+                  save_folder = '.',
+                  bands = bands)
+    
+    # delete auxiliary files if needed
+    if delete_auxiliary:
+        shutil.rmtree(past_folder, ignore_errors=True)
+        
+    print('----------------------------------------------------------\nCubes finished.')
+
+# create sentinel cubes with images from gcloud: all in one function
+def create_cubes_BDCLandsat(save_folder, bands, access_token, start_date, end_date, delete_auxiliary=True, paths_rows=predefined_paths_rows['caatinga'], proj4 = '"+proj=aea +lat_0=-12 +lon_0=-54 +lat_1=-2 +lat_2=-22 +x_0=5000000 +y_0=10000000 +ellps=GRS80 +units=m +no_defs +type=crs"', clip_shapefile_path=None):
+    
+    # change current folder
+    os.chdir(save_folder)
+    
+    ######################
+    # downloading images
+    print('----------------------------------------------------------', flush=True)
+    if not os.path.exists('bands'):
+        os.makedirs('bands')
+    
+    download_images_BDC(save_folder = './bands',
+                        bands = bands,
+                        access_token = access_token,
+                        start_date = start_date,
+                        end_date = end_date,
+                        paths_rows = paths_rows,
+                        collection = 'LC8_SR-1')
+    
+    ######################
+    # reproject images
+    print('----------------------------------------------------------', flush=True)
+    if not os.path.exists('reprojected'):
+        os.makedirs('reprojected')
+    
+    reproject_bands(files = glob.glob('./bands/*.tif'),
+                    save_folder = './reprojected',
+                    proj4 = proj4,
+                    nodata = -9999)
+    
+    # delete auxiliary files if needed
+    if delete_auxiliary:
+        shutil.rmtree('./bands', ignore_errors=True)
+    
+    ######################
+    # mosaic bands
+    print('----------------------------------------------------------', flush=True)
+    if not os.path.exists('mosaics'):
+        os.makedirs('mosaics')
+    
+    mosaic_bands(bands_folder = './reprojected', 
+                 save_folder = './mosaics', 
+                 bands = bands, 
+                 start_date = start_date, 
+                 end_date = end_date, 
+                 interval = 16,
+                 date_charsinterval_in_bandnames = [17,25],
+                 nodata = -9999)
     
     # delete auxiliary files if needed
     if delete_auxiliary:
@@ -217,19 +311,47 @@ def download_images_gcloud(save_folder, metadata_path, bands, start_date, end_da
     print('Download finished!\n')
     
 # download images from BDC
-def download_images_BDC(acess_token, start_date, end_date, paths_rows, interval=16, collection='LC8_SR-1'):
+def download_images_BDC(save_folder, bands, access_token, start_date, end_date, paths_rows, collection='LC8_SR-1'):
     
     print('- Download Images -', flush=True)
     
-    service = stac.STAC('https://brazildatacube.dpi.inpe.br/stac/', access_token=acess_token)
-    collection = service.collection(collection)
+    db = gpd.read_file(f'{package_directory}/aux/landsat_grid.shp')
+    for path, row in paths_rows:
+        print(f'\nPath: {path} - Row:{row}\n-----------------')
+        service = stac.STAC('https://brazildatacube.dpi.inpe.br/stac/', access_token=access_token)
+        collection_ = service.collection(collection)
+        rep_point = db[(db['PATH']==int(path)) & (db['ROW']==int(row))].representative_point()
+        items = collection_.get_items(
+                filter={
+                        'bbox':f'{rep_point.x.values[0]-.0001},{rep_point.y.values[0]-.0001},{rep_point.x.values[0]+.0001},{rep_point.y.values[0]+.0001}', 
+                        'datetime': f'{start_date}/{end_date}',
+                        'limit':5000
+                       }
+        )
     
-    db = gpd.read_file('./aux/landsat_grid.shp') # does it work even when we change the current working folder?
-    
-    
+        # downloads the items in the search
+        i=1
+        for item in items:
+            error_num = 0
+            not_downloaded = True
+            while not_downloaded:
+                try:
+                    print(i,'/',len(items.features))
+                    assets = item.assets
+                    for band in bands:
+                        asset = assets[band]
+                        asset.download(save_folder)
+                    i+=1
+                    not_downloaded = False
+                except ConnectionError as error:
+                    if error_num >= 5:
+                        raise error
+                    print('A ConnectionError happened while downloading. Trying again in 5 seconds...')
+                    time.sleep(5)
+                    error_num+=1
 
 # reproject the bands 
-def reproject_bands(files, save_folder, proj4 = '"+proj=aea +lat_0=-12 +lon_0=-54 +lat_1=-2 +lat_2=-22 +x_0=5000000 +y_0=10000000 +ellps=GRS80 +units=m +no_defs +type=crs"'):
+def reproject_bands(files, save_folder, proj4 = '"+proj=aea +lat_0=-12 +lon_0=-54 +lat_1=-2 +lat_2=-22 +x_0=5000000 +y_0=10000000 +ellps=GRS80 +units=m +no_defs +type=crs"', nodata = -9999):
     print('- Reprojecting Bands -', flush=True)
     # checks save_folder's consistency
     if save_folder[-1]!='/':
@@ -237,7 +359,7 @@ def reproject_bands(files, save_folder, proj4 = '"+proj=aea +lat_0=-12 +lon_0=-5
         
     # iterate and reproject bands
     for file in tqdm(files):
-        command = f'gdalwarp -co BIGTIFF=YES -srcnodata 0 -dstnodata 0 -overwrite -t_srs {proj4} -of GTiff {file} {save_folder+file.split("/")[-1]}'
+        command = f'gdalwarp -co BIGTIFF=YES -srcnodata {nodata} -dstnodata {nodata} -overwrite -t_srs {proj4} -of GTiff {file} {save_folder+file.split("/")[-1]}'
         subprocess.call(command, shell=True)
         
     # final statement   
@@ -245,7 +367,7 @@ def reproject_bands(files, save_folder, proj4 = '"+proj=aea +lat_0=-12 +lon_0=-5
         
         
 # creates a mosaic with reprojected bands
-def mosaic_bands(bands_folder, save_folder, bands, start_date, end_date, interval):
+def mosaic_bands(bands_folder, save_folder, bands, start_date, end_date, interval, date_charsinterval_in_bandnames, nodata=-9999):
     print('- Mosaicing Bands -', flush=True)
     
     # checks save_folder's consistency
@@ -268,13 +390,13 @@ def mosaic_bands(bands_folder, save_folder, bands, start_date, end_date, interva
         # iterating through the time intervals
         for [start_date, end_date] in tqdm(dates):
             # get files from the band and year specified.
-            files_mosaic = glob.glob(f'{bands_folder}/T*_{band}*')
+            files_mosaic = glob.glob(f'{bands_folder}/*{band}*')
             files_mosaic.sort()
 
             # deletes the file paths from bands outside the 15-days interval
             files_ = files_mosaic.copy()
             for file in files_mosaic:
-                file_date = file.split('/')[-1][7:15]
+                file_date = file.split('/')[-1][date_charsinterval_in_bandnames[0]:date_charsinterval_in_bandnames[1]]
                 if file_date >= start_date.strftime("%Y%m%d") and file_date<end_date.strftime("%Y%m%d"):
                     pass
                 else:
@@ -284,7 +406,7 @@ def mosaic_bands(bands_folder, save_folder, bands, start_date, end_date, interva
 
             # creating the vrt
             vrt_path = 'aux.vrt'
-            command  = f'gdalbuildvrt -vrtnodata 0 {vrt_path} '+' '.join(files_mosaic)
+            command  = f'gdalbuildvrt -vrtnodata {nodata} {vrt_path} '+' '.join(files_mosaic)
             subprocess.call(command, shell=True)
 
             # translate vrt to tif
