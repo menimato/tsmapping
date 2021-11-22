@@ -315,40 +315,50 @@ def download_images_BDC(save_folder, bands, access_token, start_date, end_date, 
     
     print('- Download Images -', flush=True)
     
-    db = gpd.read_file(f'{package_directory}/aux/landsat_grid.shp')
-    for path, row in paths_rows:
-        print(f'\nPath: {path} - Row:{row}\n-----------------')
-        service = stac.STAC('https://brazildatacube.dpi.inpe.br/stac/', access_token=access_token)
-        collection_ = service.collection(collection)
-        rep_point = db[(db['PATH']==int(path)) & (db['ROW']==int(row))].representative_point()
-        items = collection_.get_items(
-                filter={
-                        'bbox':f'{rep_point.x.values[0]-.0001},{rep_point.y.values[0]-.0001},{rep_point.x.values[0]+.0001},{rep_point.y.values[0]+.0001}', 
-                        'datetime': f'{start_date}/{end_date}',
-                        'limit':5000
-                       }
-        )
+    # in case the collection to be downloaded is based on Landsat's patha dn row
+    if collection == 'LC8_SR-1' or collection == 'LC8_DN-1':
+        db = gpd.read_file(f'{package_directory}/aux/landsat_grid.shp')
+        for path, row in paths_rows:
+            print(f'\nPath: {path} - Row:{row}\n-----------------')
+            service = stac.STAC('https://brazildatacube.dpi.inpe.br/stac/', access_token=access_token)
+            collection_ = service.collection(collection)
+            rep_point = db[(db['PATH']==int(path)) & (db['ROW']==int(row))].representative_point()
+            items = collection_.get_items(
+                    filter={
+                            'bbox':f'{rep_point.x.values[0]-.0001},{rep_point.y.values[0]-.0001},{rep_point.x.values[0]+.0001},{rep_point.y.values[0]+.0001}', 
+                            'datetime': f'{start_date}/{end_date}',
+                            'limit':5000
+                        }
+            )
+        
+            # downloads the items in the search
+            i=1
+            for item in items:
+                error_num = 0
+                print(i,'/',len(items.features))
+                for band in bands:
+                    assets = item.assets
+                    asset = assets[band]
+                    not_downloaded = True
+                    while not_downloaded:
+                        try:
+                            asset.download(save_folder)
+                            not_downloaded = False
+                        except Exception as error:
+                            if error_num >= 5:
+                                raise error
+                            print('An error happened while downloading. Trying again in 5 seconds...')
+                            time.sleep(5)
+                            error_num+=1
+                i+=1
     
-        # downloads the items in the search
-        i=1
-        for item in items:
-            error_num = 0
-            print(i,'/',len(items.features))
-            for band in bands:
-                asset = assets[band]
-                assets = item.assets
-                not_downloaded = True
-                while not_downloaded:
-                    try:
-                        asset.download(save_folder)
-                        i+=1
-                        not_downloaded = False
-                    except ConnectionError as error:
-                        if error_num >= 5:
-                            raise error
-                        print('A ConnectionError happened while downloading. Trying again in 5 seconds...')
-                        time.sleep(5)
-                        error_num+=1
+    # in case the collection to be downloaded is based on Sentinel's tiling system.
+    elif collection == 'S2_L2A-1' or collection == 'S2_L1C-1':
+        pass
+
+    # in case the target images to be downlaoded are from a data cube created by BDC.
+    elif collection == '':
+        pass
 
 # reproject the bands 
 def reproject_bands(files, save_folder, proj4 = '"+proj=aea +lat_0=-12 +lon_0=-54 +lat_1=-2 +lat_2=-22 +x_0=5000000 +y_0=10000000 +ellps=GRS80 +units=m +no_defs +type=crs"', nodata = -9999):
