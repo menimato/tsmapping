@@ -4,8 +4,10 @@
 #           - the error is happening in the mosaicing phase.
 #       - implement download from BDC.
 #       - make sure if the problem wiht tqdm starting at the second path row persists in other runs of the code.
-#       - change the while loop in the function download_images_BDC in order to encapsulate each band instead of the 
-#         whole collection item. If some download fail, all the previously successfully downloaded bands are downloaded again.
+#       - in 'download_images_BDC':
+#           - all bands in the colletion that contains Sentinel L1 in BDC is available in a single compressed file,
+#             not separated according to the bands, like other collections. I must verify if the landsat data is
+#             this too, and also I should addapt the code to handle it correctly.
 
 
 import subprocess
@@ -311,12 +313,16 @@ def download_images_gcloud(save_folder, metadata_path, bands, start_date, end_da
     print('Download finished!\n')
     
 # download images from BDC
-def download_images_BDC(save_folder, bands, access_token, start_date, end_date, paths_rows, collection='LC8_SR-1'):
-    
+def download_images_BDC(save_folder, bands, access_token, start_date, end_date, paths_rows=None, tiles=None, collection='LC8_SR-1'):
+
     print('- Download Images -', flush=True)
     
     # in case the collection to be downloaded is based on Landsat's patha dn row
     if collection == 'LC8_SR-1' or collection == 'LC8_DN-1':
+        # verifying if paths and rows were given.
+        if paths_rows==None:
+            raise ValueError('When using collections LC8_SR-1 or LC8_DN-1 the "paths_rows" argument must be different than None.')
+
         db = gpd.read_file(f'{package_directory}/aux/landsat_grid.shp')
         for path, row in paths_rows:
             print(f'\nPath: {path} - Row:{row}\n-----------------')
@@ -354,9 +360,46 @@ def download_images_BDC(save_folder, bands, access_token, start_date, end_date, 
     
     # in case the collection to be downloaded is based on Sentinel's tiling system.
     elif collection == 'S2_L2A-1' or collection == 'S2_L1C-1':
-        pass
+        # verifying if paths and rows were given.
+        if tiles==None:
+            raise ValueError('When using collections S2_L2A-1 or S2_L1C-1 the "tiles" argument must be different than None.')
 
-    # in case the target images to be downlaoded are from a data cube created by BDC.
+        db = gpd.read_file(f'{package_directory}/aux/sentinel_grid.shp')
+        for tile in tiles:
+            print(f'\nTile: {tile}\n-----------------')
+            service = stac.STAC('https://brazildatacube.dpi.inpe.br/stac/', access_token=access_token)
+            collection_ = service.collection(collection)
+            rep_point = db[db['Name']==tile].representative_point()
+            items = collection_.get_items(
+                    filter={
+                            'bbox':f'{rep_point.x.values[0]-.0001},{rep_point.y.values[0]-.0001},{rep_point.x.values[0]+.0001},{rep_point.y.values[0]+.0001}', 
+                            'datetime': f'{start_date}/{end_date}',
+                            'limit':5000
+                        }
+            )
+        
+            # downloads the items in the search
+            i=1
+            for item in items:
+                error_num = 0
+                print(i,'/',len(items.features))
+                for band in bands:
+                    assets = item.assets
+                    asset = assets[band]
+                    not_downloaded = item['properties']['bdc:tiles'][0] in tiles and not os.path.exists(os.path.join(path, asset['href'].split('/')[-1].rsplit('?')[0]))
+                    while not_downloaded:
+                        try:
+                            asset.download(save_folder)
+                            not_downloaded = False
+                        except Exception as error:
+                            if error_num >= 5:
+                                raise error
+                            print('An error happened while downloading. Trying again in 5 seconds...')
+                            time.sleep(5)
+                            error_num+=1
+                i+=1
+
+    # in case the target images to be downloaded are from a data cube created by BDC, using their tiling system.
     elif collection == '':
         pass
 
