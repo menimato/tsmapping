@@ -333,22 +333,22 @@ def download_images_BDC(save_folder, bands, access_token, start_date, end_date, 
         i=1
         for item in items:
             error_num = 0
-            not_downloaded = True
-            while not_downloaded:
-                try:
-                    print(i,'/',len(items.features))
-                    assets = item.assets
-                    for band in bands:
-                        asset = assets[band]
+            print(i,'/',len(items.features))
+            for band in bands:
+                asset = assets[band]
+                assets = item.assets
+                not_downloaded = True
+                while not_downloaded:
+                    try:
                         asset.download(save_folder)
-                    i+=1
-                    not_downloaded = False
-                except ConnectionError as error:
-                    if error_num >= 5:
-                        raise error
-                    print('A ConnectionError happened while downloading. Trying again in 5 seconds...')
-                    time.sleep(5)
-                    error_num+=1
+                        i+=1
+                        not_downloaded = False
+                    except ConnectionError as error:
+                        if error_num >= 5:
+                            raise error
+                        print('A ConnectionError happened while downloading. Trying again in 5 seconds...')
+                        time.sleep(5)
+                        error_num+=1
 
 # reproject the bands 
 def reproject_bands(files, save_folder, proj4 = '"+proj=aea +lat_0=-12 +lon_0=-54 +lat_1=-2 +lat_2=-22 +x_0=5000000 +y_0=10000000 +ellps=GRS80 +units=m +no_defs +type=crs"', nodata = -9999):
