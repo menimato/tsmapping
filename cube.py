@@ -28,7 +28,7 @@ from shapely import wkt as wkt_
 # absolute path
 package_directory = os.path.dirname(os.path.abspath(__file__))
 
-# to be used when downloading from gogole cloud
+# to be used when downloading from google cloud
 predefined_tiles = {'caatinga': {'number of paths': 5,
                                  'paths': {'path 1': {'key tile': '23LNL', 
                                                            'tiles': ['23LNG','23LNH','23LNJ','23LNK','23LNL','23LPK','23LPL','23MPM']},
