@@ -324,10 +324,11 @@ def download_images_BDC(save_folder, bands, access_token, start_date, end_date, 
     # TODO
     # - implement download from collections 'LC8_DN-1' and 'S2_L1C-1', which are available but are compressed.
     # - explain in the help for this function that wkt must not be too complex.
+    # - implement the sentinel download from BDC correctly
 
     print('- Download Images from BDC -', flush=True)
 
-    def download_items(items, save_folder, bands):
+    def download_items(items, save_folder, bands, grid_image_str, collection):
         # downloads the items in the search
         i=1
         for item in items:
@@ -336,7 +337,15 @@ def download_images_BDC(save_folder, bands, access_token, start_date, end_date, 
             for band in bands:
                 assets = item.assets
                 asset = assets[band]
-                not_downloaded = not os.path.exists(os.path.join(save_folder, asset['href'].split('/')[-1].rsplit('?')[0]))
+                file_name = asset['href'].split('/')[-1].rsplit('?')[0]
+                
+                is_in_tile = True
+                if collection == 'LC8_SR-1':
+                    is_in_tile = file_name[10:16]==grid_image_str
+                elif collection == 'S2_L2A-1':
+                    is_in_tile = file_name[1:6]==grid_image_str
+
+                not_downloaded = not os.path.exists(os.path.join(save_folder, file_name)) and is_in_tile
                 while not_downloaded:
                     try:
                         asset.download(save_folder,)
@@ -382,6 +391,7 @@ def download_images_BDC(save_folder, bands, access_token, start_date, end_date, 
             if collection=='LC8_SR-1':
                 print(f'\nPath: {grid_image[0]} - Row:{grid_image[1]}\n-----------------')
                 rep_point = db[(db['PATH']==int(grid_image[0])) & (db['ROW']==int(grid_image[1]))].representative_point()
+                grid_image_str = f'{str(grid_image[0]).zfill(3)}{str(grid_image[1]).zfill(3)}'
             elif collection=='S2_L2A-1':
                 print(f'\nTile: {grid_image}\n-----------------')
                 rep_point = db[db['Name']==grid_image].representative_point()
@@ -394,7 +404,8 @@ def download_images_BDC(save_folder, bands, access_token, start_date, end_date, 
                         }
             )
 
-            download_items(items, save_folder, bands)
+            download_items(items, save_folder, bands, grid_image_str, collection)
+        
     
         
 
