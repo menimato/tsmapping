@@ -63,6 +63,7 @@ predefined_paths_rows = {'caatinga': [[214, 64], [214, 65], [214, 66], [214, 67]
                                       [218, 62], [218, 63], [218, 64], [218, 65], [218, 66], [218, 67], [218, 68], [218, 69], [218, 70], [218, 71], [218, 72],
                                       [216, 63], [216, 64], [216, 65], [216, 66], [216, 67], [216, 68], [216, 69], [216, 70]]}
 
+
 # create sentinel cubes with images from gcloud: all in one function
 def create_cubes_gcloudSentinel(save_folder, bands, start_date, end_date, metadata_path, delete_auxiliary=True, tiles=predefined_tiles['caatinga'], interval=5, proj4 = '"+proj=aea +lat_0=-12 +lon_0=-54 +lat_1=-2 +lat_2=-22 +x_0=5000000 +y_0=10000000 +ellps=GRS80 +units=m +no_defs +type=crs"', clip_shapefile_path=None):
     
@@ -149,11 +150,22 @@ def create_cubes_gcloudSentinel(save_folder, bands, start_date, end_date, metada
         
     print('----------------------------------------------------------\nCubes finished.')
 
-# create sentinel cubes with images from gcloud: all in one function
-def create_cubes_BDCLandsat(save_folder, bands, access_token, start_date, end_date, delete_auxiliary=True, paths_rows=predefined_paths_rows['caatinga'], proj4 = '"+proj=aea +lat_0=-12 +lon_0=-54 +lat_1=-2 +lat_2=-22 +x_0=5000000 +y_0=10000000 +ellps=GRS80 +units=m +no_defs +type=crs"', clip_shapefile_path=None):
+
+# create cubes with images from BDC: all in one function
+def create_cubes_BDC(save_folder, bands, access_token, start_date, end_date, delete_auxiliary=True, collection='LC8_SR-1', grid_images=predefined_paths_rows['caatinga'], proj4 = '"+proj=aea +lat_0=-12 +lon_0=-54 +lat_1=-2 +lat_2=-22 +x_0=5000000 +y_0=10000000 +ellps=GRS80 +units=m +no_defs +type=crs"', clip_shapefile_path=None):
     
     # change current folder
     os.chdir(save_folder)
+
+    # define additional  parameters according to collection
+    if collection == 'LC8_SR-1':
+        nodata = -9999
+        interval = 16
+        date_charsinterval_in_bandnames = [17,25]
+    elif collection == 'S2_L2A-1':
+        nodata = 0
+        interval = 5
+        date_charsinterval_in_bandnames = [7,15]
     
     ######################
     # downloading images
@@ -166,8 +178,8 @@ def create_cubes_BDCLandsat(save_folder, bands, access_token, start_date, end_da
                         access_token = access_token,
                         start_date = start_date,
                         end_date = end_date,
-                        grid_images = paths_rows,
-                        collection = 'LC8_SR-1')
+                        grid_images = grid_images,
+                        collection = collection)
     
     ######################
     # reproject images
@@ -178,7 +190,7 @@ def create_cubes_BDCLandsat(save_folder, bands, access_token, start_date, end_da
     reproject_bands(files = glob.glob('./bands/*.tif'),
                     save_folder = './reprojected',
                     proj4 = proj4,
-                    nodata = -9999)
+                    nodata = nodata)
     
     # delete auxiliary files if needed
     if delete_auxiliary:
@@ -195,9 +207,9 @@ def create_cubes_BDCLandsat(save_folder, bands, access_token, start_date, end_da
                  bands = bands, 
                  start_date = start_date, 
                  end_date = end_date, 
-                 interval = 16,
-                 date_charsinterval_in_bandnames = [17,25],
-                 nodata = -9999)
+                 interval = interval,
+                 date_charsinterval_in_bandnames = date_charsinterval_in_bandnames,
+                 nodata = nodata)
     
     # delete auxiliary files if needed
     if delete_auxiliary:
@@ -235,7 +247,7 @@ def create_cubes_BDCLandsat(save_folder, bands, access_token, start_date, end_da
         
     print('----------------------------------------------------------\nCubes finished.')
     
-    
+
 # download images from google cloud
 def download_images_gcloud(save_folder, metadata_path, bands, start_date, end_date, tiles=predefined_tiles['caatinga'], interval=5):
     print('- Download Images -', flush=True)
@@ -309,16 +321,18 @@ def download_images_gcloud(save_folder, metadata_path, bands, start_date, end_da
                     granule_id = sub_df[sub_df['CLOUD_COVER'] == sub_df['CLOUD_COVER'].min()].GRANULE_ID.values[0]
                     # iterates through bands to download
                     for band in bands:
-                        # downloads the necessary files
-                        command = f'gsutil -m cp -R {url}/GRANULE/{granule_id}/IMG_DATA/T{tile}_{url.split("_", 3)[2]+"_"+band+".jp2"} {save_folder}'
-                        subprocess.call(command, shell=True)
+                        if not os.path.exists(os.path.join(save_folder, f'T{tile}_{url.split("_", 3)[2]+"_"+band+".jp2"}')):
+                            # downloads the necessary files
+                            command = f'gsutil -m cp -R {url}/GRANULE/{granule_id}/IMG_DATA/T{tile}_{url.split("_", 3)[2]+"_"+band+".jp2"} {save_folder}'
+                            subprocess.call(command, shell=True)
                 else:
                     # spit error
                     print(f'Tile {tile} did not have any candidate images between {start_date} and {end_date}.')
     
     # final statement   
     print('Download finished!\n')
-    
+
+
 # download images from BDC
 def download_images_BDC(save_folder, bands, access_token, start_date, end_date, wkt=None, grid_images=None, collection='LC8_SR-1'):
     # TODO
@@ -348,7 +362,7 @@ def download_images_BDC(save_folder, bands, access_token, start_date, end_date, 
                 not_downloaded = not os.path.exists(os.path.join(save_folder, file_name)) and is_in_tile
                 while not_downloaded:
                     try:
-                        asset.download(save_folder,)
+                        asset.download(save_folder)
                         not_downloaded = False
                     except Exception as error:
                         if error_num >= 5:
@@ -395,6 +409,7 @@ def download_images_BDC(save_folder, bands, access_token, start_date, end_date, 
             elif collection=='S2_L2A-1':
                 print(f'\nTile: {grid_image}\n-----------------')
                 rep_point = db[db['Name']==grid_image].representative_point()
+                grid_image_str = grid_image
         
             items = collection_.get_items(
                     filter={
@@ -405,8 +420,6 @@ def download_images_BDC(save_folder, bands, access_token, start_date, end_date, 
             )
 
             download_items(items, save_folder, bands, grid_image_str, collection)
-        
-    
         
 
 # reproject the bands 
@@ -479,6 +492,7 @@ def mosaic_bands(bands_folder, save_folder, bands, start_date, end_date, interva
     # final statement   
     print('Mosaicing finished!\n')
     
+
 # crop to shapefile
 def clip_shapefile(files, shapefile, save_folder):
     print('- Clip with Shapefile -', flush=True)
@@ -538,14 +552,15 @@ def acquire_dates(start_date, final_date, interval):
     dates = []
     
     end_date = start_date + datetime.timedelta(days=interval)
-    
-    while end_date<final_date:
+
+    while end_date<=final_date:
         dates.append([start_date, end_date])
 
         start_date = end_date
         end_date += datetime.timedelta(days=interval)
         
     return dates
+
 
 # update metadata
 def update_metadata(save_folder = '.'):
