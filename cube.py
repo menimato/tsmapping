@@ -25,6 +25,7 @@ import stac
 import time
 import shapely.geometry
 from shapely import wkt as wkt_
+from rasterio.warp import calculate_default_transform, reproject, Resampling
 
 # absolute path
 package_directory = os.path.dirname(os.path.abspath(__file__))
@@ -431,7 +432,7 @@ def reproject_bands(files, save_folder, proj4 = '"+proj=aea +lat_0=-12 +lon_0=-5
         
     # iterate and reproject bands
     for file in tqdm(files):
-        command = f'gdalwarp -co BIGTIFF=YES -srcnodata {nodata} -dstnodata {nodata} -overwrite -t_srs {proj4} -of GTiff {file} {save_folder+file.split("/")[-1]}'
+        command = f'gdalwarp -wo NUM_THREADS=4 -co BIGTIFF=YES -srcnodata {nodata} -dstnodata {nodata} -overwrite -t_srs {proj4} -of GTiff {file} {save_folder+file.split("/")[-1]}'
         subprocess.call(command, shell=True)
         
     # final statement   
