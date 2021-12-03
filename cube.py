@@ -364,8 +364,6 @@ def download_images_BDC(save_folder, access_token, start_date, end_date, bands=N
                     is_in_tile = True
                     if collection == 'LC8_SR-1':
                         is_in_tile = file_name[10:16]==grid_image_str
-                        print(file_name[10:16])
-                        return 0
                     elif collection == 'S2_L2A-1':
                         is_in_tile = file_name[1:6]==grid_image_str
 
