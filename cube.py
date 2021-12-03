@@ -163,6 +163,10 @@ def create_cubes_BDC(save_folder, bands, access_token, start_date, end_date, del
         nodata = -9999
         interval = 16
         date_charsinterval_in_bandnames = [17,25]
+    elif collection == 'LC8_DN-1':
+        nodata = 0
+        interval = 16
+        date_charsinterval_in_bandnames = [17,25]
     elif collection == 'S2_L2A-1':
         nodata = 0
         interval = 5
@@ -188,10 +192,12 @@ def create_cubes_BDC(save_folder, bands, access_token, start_date, end_date, del
     if not os.path.exists('reprojected'):
         os.makedirs('reprojected')
     
-    reproject_bands(files = glob.glob('./bands/*.tif'),
-                    save_folder = './reprojected',
-                    proj4 = proj4,
-                    nodata = nodata)
+    for band in bands:
+        print(band)
+        reproject_bands(files = glob.glob(f'./bands/*{band}*'),
+                        save_folder = './reprojected',
+                        proj4 = proj4,
+                        nodata = nodata)
     
     # delete auxiliary files if needed
     if delete_auxiliary:
@@ -335,7 +341,7 @@ def download_images_gcloud(save_folder, metadata_path, bands, start_date, end_da
 
 
 # download images from BDC
-def download_images_BDC(save_folder, bands, access_token, start_date, end_date, wkt=None, grid_images=None, collection='LC8_SR-1'):
+def download_images_BDC(save_folder, access_token, start_date, end_date, bands=None, wkt=None, grid_images=None, collection='LC8_SR-1'):
     # TODO
     # - implement download from collections 'LC8_DN-1' and 'S2_L1C-1', which are available but are compressed.
     # - explain in the help for this function that wkt must not be too complex.
@@ -349,28 +355,49 @@ def download_images_BDC(save_folder, bands, access_token, start_date, end_date, 
         for item in items:
             error_num = 0
             print(i,'/',len(items.features))
-            for band in bands:
-                assets = item.assets
-                asset = assets[band]
-                file_name = asset['href'].split('/')[-1].rsplit('?')[0]
-                
-                is_in_tile = True
-                if collection == 'LC8_SR-1':
-                    is_in_tile = file_name[10:16]==grid_image_str
-                elif collection == 'S2_L2A-1':
-                    is_in_tile = file_name[1:6]==grid_image_str
+            if collection == 'LC8_SR-1' or collection == 'S2_L2A-1':
+                for band in bands:
+                    assets = item.assets
+                    asset = assets[band]
+                    file_name = asset['href'].split('/')[-1].rsplit('?')[0]
+                    
+                    is_in_tile = True
+                    if collection == 'LC8_SR-1':
+                        is_in_tile = file_name[10:16]==grid_image_str
+                        print(file_name[10:16])
+                        return 0
+                    elif collection == 'S2_L2A-1':
+                        is_in_tile = file_name[1:6]==grid_image_str
 
-                not_downloaded = not os.path.exists(os.path.join(save_folder, file_name)) and is_in_tile
+                    not_downloaded = not os.path.exists(os.path.join(save_folder, file_name)) and is_in_tile
+                    while not_downloaded:
+                        try:
+                            asset.download(save_folder)
+                            not_downloaded = False
+                        except Exception as error:
+                            if error_num >= 5:
+                                raise error
+                            print('An error happened while downloading. Trying again in 5 seconds...')
+                            time.sleep(5)
+                            error_num+=1
+            elif collection == 'LC8_DN-1' or collection == 'S2_L1C-1':
+                not_downloaded = True
                 while not_downloaded:
                     try:
-                        asset.download(save_folder)
+                        item.download(save_folder)
                         not_downloaded = False
+
+                        print('Extracting...', end='')
+                        command = f"tar -xf '{os.path.join(save_folder, item['assets']['asset']['href'].split('/')[-1].split('?')[0])}' -C '{save_folder}' && rm -rf '{os.path.join(save_folder, item['assets']['asset']['href'].split('/')[-1].split('?')[0])}'"
+                        subprocess.call(command, shell=True)
+                        print(' Done!')
                     except Exception as error:
                         if error_num >= 5:
                             raise error
                         print('An error happened while downloading. Trying again in 5 seconds...')
                         time.sleep(5)
                         error_num+=1
+
             i+=1
 
     # create service
@@ -381,7 +408,7 @@ def download_images_BDC(save_folder, bands, access_token, start_date, end_date, 
     if wkt is None and grid_images is None:
         raise ValueError("'wkt' or 'grid_images' must be given.")
 
-    if collection=='LC8_SR-1':
+    if collection=='LC8_SR-1' or collection=='LC8_DN-1':
         db = gpd.read_file(f'{package_directory}/aux/landsat_grid.shp')
     elif collection=='S2_L2A-1':
         db = gpd.read_file(f'{package_directory}/aux/sentinel_grid.shp')
@@ -403,11 +430,11 @@ def download_images_BDC(save_folder, bands, access_token, start_date, end_date, 
     else:
         for grid_image in grid_images:
 
-            if collection=='LC8_SR-1':
+            if collection=='LC8_SR-1' or collection=='LC8_DN-1':
                 print(f'\nPath: {grid_image[0]} - Row:{grid_image[1]}\n-----------------')
                 rep_point = db[(db['PATH']==int(grid_image[0])) & (db['ROW']==int(grid_image[1]))].representative_point()
                 grid_image_str = f'{str(grid_image[0]).zfill(3)}{str(grid_image[1]).zfill(3)}'
-            elif collection=='S2_L2A-1':
+            elif collection=='S2_L2A-1' or collection=='S2_L1C-1':
                 print(f'\nTile: {grid_image}\n-----------------')
                 rep_point = db[db['Name']==grid_image].representative_point()
                 grid_image_str = grid_image
