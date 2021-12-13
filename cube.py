@@ -2,11 +2,7 @@
 #       - add functions help and description.
 #       - missing dates are being filled with the previous available image
 #           - the error is happening in the mosaicing phase.
-#       - implement download from BDC.
 #       - make sure if the problem wiht tqdm starting at the second path row persists in other runs of the code.
-#       - in 'download_images_BDC':
-#           - all bands in the colletion that contains Sentinel L1 in BDC is available in a single compressed file,
-#             not separated according to the bands, like other collections. 
 #       - substitute everywhere with os.path.join() instead of simple string operations. 
 #       - implement creation of cube with wkt.
 #       - in create stack function, make it sort the files by the appropriate key.
@@ -32,7 +28,7 @@ package_directory = os.path.dirname(os.path.abspath(__file__))
 
 # to be used when downloading from google cloud
 predefined_tiles = {'caatinga': {'number of paths': 5,
-                                 'paths': {'path 1': {'key tile': '23LNL', 
+                                 'paths': {'path 1': {'key tile': '23LNL',
                                                            'tiles': ['23LNG','23LNH','23LNJ','23LNK','23LNL','23LPK','23LPL','23MPM']},
                                                 'path 2': {'key tile': '23LQL',
                                                            'tiles': ['23KPB', '23LMC', '23LNC', '23LND', '23LNE', '23LNF', '23LNG', '23LNH', '23LPC', '23LPD', 
@@ -66,8 +62,65 @@ predefined_paths_rows = {'caatinga': [[214, 64], [214, 65], [214, 66], [214, 67]
 
 
 # create sentinel cubes with images from gcloud: all in one function
-def create_cubes_gcloudSentinel(save_folder, bands, start_date, end_date, metadata_path, delete_auxiliary=True, tiles=predefined_tiles['caatinga'], interval=5, proj4 = '"+proj=aea +lat_0=-12 +lon_0=-54 +lat_1=-2 +lat_2=-22 +x_0=5000000 +y_0=10000000 +ellps=GRS80 +units=m +no_defs +type=crs"', clip_shapefile_path=None):
+def create_cubes_gcloudSentinel(save_folder, bands, start_date, end_date, metadata_path, tiles, delete_auxiliary=True, interval=5, proj4 = '"+proj=aea +lat_0=-12 +lon_0=-54 +lat_1=-2 +lat_2=-22 +x_0=5000000 +y_0=10000000 +ellps=GRS80 +units=m +no_defs +type=crs"', clip_shapefile_path=None):
+    """
+    Creates data cube stacks for each band, downloading images from Google
+    Cloud. More information about images in https://cloud.google.com/storage/docs/public-datasets/sentinel-2.
+    Before using this function, please use tsmapping.cube.update_metadata() to
+    retrieve Sentinel-2 metadata.
+
+    Parameters
+    ----------
+    save_folder: string
+        Path to the forder to save the data cube stacks.
+    bands: list of strings
+        Bands used to create the data cube stacks. Each band in the lsit will
+        have a stack in the final process, inside save_folder. 
+        Ex.: ['B02', 'B03', 'B04', 'B08']
+    start_date: string
+        Start date for the time series to be retrieved for the data cube. The
+        date must be inserted in the following format: 'YYYY-MM-DD'.
+    end_date: string
+        End date for the time series to be retrieved for the data cube. The
+        date must be inserted in the following format: 'YYYY-MM-DD'.
+    metadata_path: string
+        Path to the metadata file downloaded with tsmapping.cube.update_metadata().
+        Filename included. 
+    tiles: dict
+        This variable must follow the model presented in 
+        tsmapping.cube.predefined_tile['caatinga']. 'number of paths' is the
+        number of Sentinel-2 paths that intersect the study area, and inside
+        'paths' there must exist the same amount of 'path n' starting with n=1 
+        until n='number of paths'. Each 'path n' must have a 'key tile' and 
+        'tiles'. 'key tile' is a tile that is not within any other 
+        Sentinel-2 path, but the one represented by 'path n'. It is used to 
+        acquire the image dates referent to the path being described. 'tiles'
+        is the tiles to donwload and create the data cube stacks. 'tiles' does 
+        not have to contain 'key tile'.
+        Ex.: {'number of paths': 1,
+              'paths': {'path 1': {'key tile': '24LTK',
+                                  'tiles': ['24LTL', '24LUK']}}}
+        Obs.: To find 'key tile' and 'tiles' the files under tsmapping.aux can
+        be used.
+    delete_auxiliary: bool, optional
+        Wheter to delete intermediate files used to create the cube, like 
+        bands without reprojecting or mosaics without clipping to shapefile.
+    interval: int, optional
+        The interval used to create the time series, in days. In case there are
+        multiple images within the interval, the one with the lowest cloud
+        percentage will be chosen.
+    proj4: string, optional
+        The projection used in the reprojection phase. This is the final
+        projection of the data cubes. It is recommended to insert it in
+        the proj4 format.
+    clip_shapefile_path: string, optional
+        The path to the shapefile used to clip the mosaics before creating the
+        data cube. If it is not given, the clipping step is completely skipped.
     
+    Returns
+    -------
+    None
+    """
     # change current folder
     os.chdir(save_folder)
     
@@ -154,7 +207,9 @@ def create_cubes_gcloudSentinel(save_folder, bands, start_date, end_date, metada
 
 # create cubes with images from BDC: all in one function
 def create_cubes_BDC(save_folder, bands, access_token, start_date, end_date, delete_auxiliary=True, collection='LC8_SR-1', grid_images=predefined_paths_rows['caatinga'], proj4 = '"+proj=aea +lat_0=-12 +lon_0=-54 +lat_1=-2 +lat_2=-22 +x_0=5000000 +y_0=10000000 +ellps=GRS80 +units=m +no_defs +type=crs"', clip_shapefile_path=None):
+    """
     
+    """
     # change current folder
     os.chdir(save_folder)
 
@@ -343,7 +398,6 @@ def download_images_gcloud(save_folder, metadata_path, bands, start_date, end_da
 # download images from BDC
 def download_images_BDC(save_folder, access_token, start_date, end_date, bands=None, wkt=None, grid_images=None, collection='LC8_SR-1'):
     # TODO
-    # - implement download from collections 'LC8_DN-1' and 'S2_L1C-1', which are available but are compressed.
     # - explain in the help for this function that wkt must not be too complex.
     # - implement the sentinel download from BDC correctly
 
@@ -451,13 +505,10 @@ def download_images_BDC(save_folder, access_token, start_date, end_date, bands=N
 # reproject the bands 
 def reproject_bands(files, save_folder, proj4 = '"+proj=aea +lat_0=-12 +lon_0=-54 +lat_1=-2 +lat_2=-22 +x_0=5000000 +y_0=10000000 +ellps=GRS80 +units=m +no_defs +type=crs"', nodata = -9999):
     print('- Reprojecting Bands -', flush=True)
-    # checks save_folder's consistency
-    if save_folder[-1]!='/':
-        save_folder = save_folder+'/'
         
     # iterate and reproject bands
     for file in tqdm(files):
-        command = f'gdalwarp -wo NUM_THREADS=4 -wm 4096 -co BIGTIFF=YES -srcnodata {nodata} -dstnodata {nodata} -overwrite -t_srs {proj4} -of GTiff {file} {save_folder+file.split("/")[-1]}'
+        command = f'gdalwarp -wo NUM_THREADS=4 -wm 4096 -co BIGTIFF=YES -srcnodata {nodata} -dstnodata {nodata} -overwrite -t_srs {proj4} -of GTiff {file} {os.path.join(save_folder, file.split("/")[-1])}'
         subprocess.call(command, shell=True)
         
     # final statement   
@@ -467,10 +518,6 @@ def reproject_bands(files, save_folder, proj4 = '"+proj=aea +lat_0=-12 +lon_0=-5
 # creates a mosaic with reprojected bands
 def mosaic_bands(bands_folder, save_folder, bands, start_date, end_date, interval, date_charsinterval_in_bandnames, nodata=-9999):
     print('- Mosaicing Bands -', flush=True)
-    
-    # checks save_folder's consistency
-    if save_folder[-1]=='/':
-        save_folder = save_folder[:-1]
         
     # starts the dates to be used
     start_date = datetime.datetime.strptime(start_date, '%Y-%m-%d')
@@ -508,7 +555,7 @@ def mosaic_bands(bands_folder, save_folder, bands, start_date, end_date, interva
             subprocess.call(command, shell=True)
 
             # translate vrt to tif
-            translate_path = f'{save_folder}/S{start_date.strftime("%Y%m%d")}-E{end_date.strftime("%Y%m%d")}_{band}.tif'
+            translate_path = os.path.join(save_folder,f'/S{start_date.strftime("%Y%m%d")}-E{end_date.strftime("%Y%m%d")}_{band}.tif')
             command = f'gdal_translate -co BIGTIFF=YES -co COMPRESS=PACKBITS -of GTiff {vrt_path} {translate_path}'
             subprocess.call(command, shell=True)
             
@@ -523,13 +570,9 @@ def mosaic_bands(bands_folder, save_folder, bands, start_date, end_date, interva
 def clip_shapefile(files, shapefile, save_folder):
     print('- Clip with Shapefile -', flush=True)
     
-    # checks save_folder's consistency
-    if save_folder[-1]=='/':
-        save_folder = save_folder[:-1]
-    
     # iterate through files and crop them with gdal
     for file in tqdm(files):
-        command = f'gdalwarp -co BIGTIFF=YES -co COMPRESS=PACKBITS -of GTiff -cutline "{shapefile}" -crop_to_cutline "{file}" "{save_folder}/{file.split("/")[-1]}"'
+        command = f'gdalwarp -co BIGTIFF=YES -co COMPRESS=PACKBITS -of GTiff -cutline "{shapefile}" -crop_to_cutline "{file}" "{os.path.join(save_folder,file.split("/")[-1])}"'
         subprocess.call(command, shell=True)
         
     # final statement   
@@ -543,10 +586,6 @@ def create_stacks(bands_folder, save_folder, bands):
     # checks bands_folder's consistency
     if bands_folder[-1]=='/':
         bands_folder = bands_folder[:-1]
-        
-    # checks save_folder's consistency
-    if save_folder[-1]=='/':
-        save_folder = save_folder[:-1]
     
     # iterating through bands
     for band in bands:
@@ -563,7 +602,7 @@ def create_stacks(bands_folder, save_folder, bands):
         subprocess.call(command, shell=True)
         
         # translates the VRT into a GeoTIFF with the bands
-        command = f'gdal_translate -co BIGTIFF=YES -co COMPRESS=PACKBITS -of GTiff aux.vrt {save_folder}/{files[0].split("/")[-1][:9]}-{files[-1].split("/")[-1][10:19]}_{band}.tif'
+        command = f'gdal_translate -co BIGTIFF=YES -co COMPRESS=PACKBITS -of GTiff aux.vrt {os.path.join(save_folder, files[0].split("/")[-1][:9]+"-"+files[-1].split("/")[-1][10:19])}_{band}.tif'
         subprocess.call(command, shell=True)
     
     # delete created vrt
@@ -590,17 +629,14 @@ def acquire_dates(start_date, final_date, interval):
 
 # update metadata
 def update_metadata(save_folder = '.'):
-    # checks save_folder's consistency
-    if save_folder[-1]=='/':
-        save_folder = save_folder[:-1]
     
     # downloads the data from google cloud
     command = f'gsutil -m cp -R gs://gcp-public-data-sentinel-2/index.csv.gz {save_folder}'
     subprocess.call(command, shell=True)
     
     # extract the data
-    command = f'gzip -d {save_folder}/index.csv.gz'
+    command = f'gzip -d '+ os.path.join(save_folder,'index.csv.gz')
     subprocess.call(command, shell=True)
     
     # rename metadata file
-    os.rename(f'{save_folder}/index.csv', f'{save_folder}/Sentinel2-L1.csv')
+    os.rename(os.path.join(save_folder,'index.csv'), os.path.join(save_folder, 'Sentinel2-L1.csv'))
