@@ -74,7 +74,7 @@ def create_cubes_gcloudSentinel(save_folder, bands, start_date, end_date, metada
     save_folder: string
         Path to the forder to save the data cube stacks.
     bands: list of strings
-        Bands used to create the data cube stacks. Each band in the lsit will
+        Bands used to create the data cube stacks. Each band in the list will
         have a stack in the final process, inside save_folder. 
         Ex.: ['B02', 'B03', 'B04', 'B08']
     start_date: string
@@ -208,7 +208,58 @@ def create_cubes_gcloudSentinel(save_folder, bands, start_date, end_date, metada
 # create cubes with images from BDC: all in one function
 def create_cubes_BDC(save_folder, bands, access_token, start_date, end_date, delete_auxiliary=True, collection='LC8_SR-1', grid_images=predefined_paths_rows['caatinga'], proj4 = '"+proj=aea +lat_0=-12 +lon_0=-54 +lat_1=-2 +lat_2=-22 +x_0=5000000 +y_0=10000000 +ellps=GRS80 +units=m +no_defs +type=crs"', clip_shapefile_path=None):
     """
+    Creates data cube stacks for each band, downloading images from Brazil
+    Data Cube. More information in https://brazildatacube.dpi.inpe.br/portal/explore.
     
+    Parameters
+    ----------
+    save_folder: string
+        Path to the forder to save the data cube stacks. 
+    bands: list of strings
+        Bands used to create the data cube stacks. Each band in the list will
+        have a stack in the final process, inside save_folder. 
+        Ex.: ['sr_band2', 'sr_band3', 'sr_band4', 'sr_band5'] for Landsat-8
+        surface reflectance, ['B02', 'B03', 'B04', 'B08'] for Sentinel-2 
+        surface reflectance, and ['B2', 'B3', 'B4', 'B5'] for Landsat-8 digital
+        number.
+    access_token: string
+        The token required to download from the Brazil Data Cube servers.
+    start_date: string
+        Start date for the time series to be retrieved for the data cube. The
+        date must be inserted in the following format: 'YYYY-MM-DD'.
+    end_date: string
+        End date for the time series to be retrieved for the data cube. The
+        date must be inserted in the following format: 'YYYY-MM-DD'.
+    delete_auxiliary: bool, optional
+        Wheter to delete intermediate files used to create the cube, like 
+        bands without reprojecting or mosaics without clipping to shapefile.
+    collection: string, optional
+        The collection used to create the data cube stacks. Currrent supported
+        options are:
+        - 'LC8_DN-1' (Landsat-8 digital number)
+            https://brazildatacube.dpi.inpe.br/stac/collections/LC8_DN-1?access_token=nZ97OpESX5DTWuFhkh3aZ3o4g4vBGocxz7Gzju3twv
+        - 'LC8_SR-1' (Landsat-8 surface reflectance)
+            https://brazildatacube.dpi.inpe.br/stac/collections/LC8_SR-1?access_token=nZ97OpESX5DTWuFhkh3aZ3o4g4vBGocxz7Gzju3twv
+        - 'S2_L2A-1' (Sentinel-2 surface reflectance).
+            https://brazildatacube.dpi.inpe.br/stac/collections/S2_L2A-1?access_token=nZ97OpESX5DTWuFhkh3aZ3o4g4vBGocxz7Gzju3twv
+        The images' availability can vary drastically depending on the
+        collection.
+    grid_images: list of strings or list of lists of numbers, optional
+        The list of Sentinel-2 tiles (string) or Landsat-8 path-rows that
+        are within the study area.
+        Ex.: ['23LQH', '23LQJ', '23LQK'] or
+             [[214, 64], [214, 65], [214, 66]].
+    proj4: string, optional
+        The projection used in the reprojection phase. This is the final
+        projection of the data cubes. It is recommended to insert it in
+        the proj4 format.
+    clip_shapefile_path: string, optional
+        The path to the shapefile used to clip the mosaics before creating the
+        data cube. If it is not given, the clipping step is completely skipped.
+
+    Returns
+    -------
+    None
     """
     # change current folder
     os.chdir(save_folder)
@@ -312,6 +363,51 @@ def create_cubes_BDC(save_folder, bands, access_token, start_date, end_date, del
 
 # download images from google cloud
 def download_images_gcloud(save_folder, metadata_path, bands, start_date, end_date, tiles=predefined_tiles['caatinga'], interval=5):
+    """
+    Downloads images directly from Google Cloud Storage.
+
+    Parameters
+    ----------
+    save_folder: string
+        Path to the folder where the images must be saved.
+    metadata_path: string
+        Path to the metadata file for the Google Cloud available images. 
+        Retrieved with tsmapping.cube.update_metadata().
+    bands: list of strings
+        Bands to be downloaded. Ex.: ['B02', 'B03', 'B04', 'B08']
+    start_date: string
+        Start date for the images to be downloaded. The date must be inserted
+        in the following format: 'YYYY-MM-DD'.
+    end_date: string
+        End date for the images to be downloaded. The date must be inserted in
+        the following format: 'YYYY-MM-DD'.
+    tiles: dict, optional
+        This variable must follow the model presented in 
+        tsmapping.cube.predefined_tile['caatinga']. 'number of paths' is the
+        number of Sentinel-2 paths that intersect the study area, and inside
+        'paths' there must exist the same amount of 'path n' starting with n=1 
+        until n='number of paths'. Each 'path n' must have a 'key tile' and 
+        'tiles'. 'key tile' is a tile that is not within any other 
+        Sentinel-2 path, but the one represented by 'path n'. It is used to 
+        acquire the image dates referent to the path being described. 'tiles'
+        is the tiles to donwload and create the data cube stacks. 'tiles' does 
+        not have to contain 'key tile'. It defaults to donwloading all Caatinga
+        tiles.
+        Ex.: {'number of paths': 1,
+              'paths': {'path 1': {'key tile': '24LTK',
+                                  'tiles': ['24LTL', '24LUK']}}}
+        Obs.: To find 'key tile' and 'tiles' the files under tsmapping.aux can
+        be used.
+    interval: int
+        Time interval in days to search for bands. In case more than one image
+        is found within the time interval, the entry with the lower percentage
+        of clouds and cloud shadows will be downloaded.
+
+    Returns
+    -------
+    None
+    """
+
     print('- Download Images -', flush=True)
     print('Loading metadata...', flush=True)
     
@@ -396,10 +492,49 @@ def download_images_gcloud(save_folder, metadata_path, bands, start_date, end_da
 
 
 # download images from BDC
-def download_images_BDC(save_folder, access_token, start_date, end_date, bands=None, wkt=None, grid_images=None, collection='LC8_SR-1'):
-    # TODO
-    # - explain in the help for this function that wkt must not be too complex.
-    # - implement the sentinel download from BDC correctly
+def download_images_BDC(save_folder, access_token, start_date, end_date, bands, grid_images, collection='LC8_SR-1'):
+    """
+    Help downloading images from Brazil Data Cube.
+
+    Parameters
+    ----------
+    save_folder: string
+        Path to the folder where the images must be saved.
+    access_token: string
+        The token required to download from the Brazil Data Cube servers.
+    start_date: string
+        Start date for images to be downloaded. The date must be inserted in 
+        the following format: 'YYYY-MM-DD'.
+    end_date: string
+        End date for the images to be downlaoded. The date must be inserted in
+        the following format: 'YYYY-MM-DD'.
+    bands: list of strings
+        Bands to download. 
+        Ex.: ['sr_band2', 'sr_band3', 'sr_band4', 'sr_band5'] for Landsat-8
+        surface reflectance, ['B02', 'B03', 'B04', 'B08'] for Sentinel-2 
+        surface reflectance, and ['B2', 'B3', 'B4', 'B5'] for Landsat-8 digital
+        number.
+    grid_images: list of strings or list of lists of numbers, optional
+        The list of Sentinel-2 tiles (string) or Landsat-8 path-rows that
+        are within the study area.
+        Ex.: ['23LQH', '23LQJ', '23LQK'] or
+             [[214, 64], [214, 65], [214, 66]].
+    collection: string, optional
+        The collection used to create the data cube stacks. Currrent supported
+        options are:
+        - 'LC8_DN-1' (Landsat-8 digital number)
+            https://brazildatacube.dpi.inpe.br/stac/collections/LC8_DN-1?access_token=nZ97OpESX5DTWuFhkh3aZ3o4g4vBGocxz7Gzju3twv
+        - 'LC8_SR-1' (Landsat-8 surface reflectance)
+            https://brazildatacube.dpi.inpe.br/stac/collections/LC8_SR-1?access_token=nZ97OpESX5DTWuFhkh3aZ3o4g4vBGocxz7Gzju3twv
+        - 'S2_L2A-1' (Sentinel-2 surface reflectance).
+            https://brazildatacube.dpi.inpe.br/stac/collections/S2_L2A-1?access_token=nZ97OpESX5DTWuFhkh3aZ3o4g4vBGocxz7Gzju3twv
+        The images' availability can vary drastically depending on the
+        collection.
+
+    Returns
+    -------
+    None
+    """
 
     print('- Download Images from BDC -', flush=True)
 
@@ -455,55 +590,53 @@ def download_images_BDC(save_folder, access_token, start_date, end_date, bands=N
     # create service
     service = stac.STAC('https://brazildatacube.dpi.inpe.br/stac/', access_token=access_token)
     collection_ = service.collection(collection)
-    
-    # check if a method was chosen to search for the images
-    if wkt is None and grid_images is None:
-        raise ValueError("'wkt' or 'grid_images' must be given.")
 
     if collection=='LC8_SR-1' or collection=='LC8_DN-1':
         db = gpd.read_file(f'{package_directory}/aux/landsat_grid.shp')
     elif collection=='S2_L2A-1':
         db = gpd.read_file(f'{package_directory}/aux/sentinel_grid.shp')
 
-    if not wkt is None:
-            geom = wkt_.loads(wkt)
-            items = collection_.get_items(
-                filter = dict(intersects=shapely.geometry.mapping(geom))
-                    # filter={
-                    #         'wkt':wkt,
-                    #         'datetime': f'{start_date}/{end_date}',
-                    #         'limit':15000
-                    #     }
-            )
+    for grid_image in grid_images:
 
-            return items
+        if collection=='LC8_SR-1' or collection=='LC8_DN-1':
+            print(f'\nPath: {grid_image[0]} - Row:{grid_image[1]}\n-----------------')
+            rep_point = db[(db['PATH']==int(grid_image[0])) & (db['ROW']==int(grid_image[1]))].representative_point()
+            grid_image_str = f'{str(grid_image[0]).zfill(3)}{str(grid_image[1]).zfill(3)}'
+        elif collection=='S2_L2A-1' or collection=='S2_L1C-1':
+            print(f'\nTile: {grid_image}\n-----------------')
+            rep_point = db[db['Name']==grid_image].representative_point()
+            grid_image_str = grid_image
+    
+        items = collection_.get_items(
+                filter={
+                        'bbox':f'{rep_point.x.values[0]-.0001},{rep_point.y.values[0]-.0001},{rep_point.x.values[0]+.0001},{rep_point.y.values[0]+.0001}', 
+                        'datetime': f'{start_date}/{end_date}',
+                        'limit':5000
+                    }
+        )
 
-            # download_items(items, save_folder, bands)
-    else:
-        for grid_image in grid_images:
-
-            if collection=='LC8_SR-1' or collection=='LC8_DN-1':
-                print(f'\nPath: {grid_image[0]} - Row:{grid_image[1]}\n-----------------')
-                rep_point = db[(db['PATH']==int(grid_image[0])) & (db['ROW']==int(grid_image[1]))].representative_point()
-                grid_image_str = f'{str(grid_image[0]).zfill(3)}{str(grid_image[1]).zfill(3)}'
-            elif collection=='S2_L2A-1' or collection=='S2_L1C-1':
-                print(f'\nTile: {grid_image}\n-----------------')
-                rep_point = db[db['Name']==grid_image].representative_point()
-                grid_image_str = grid_image
-        
-            items = collection_.get_items(
-                    filter={
-                            'bbox':f'{rep_point.x.values[0]-.0001},{rep_point.y.values[0]-.0001},{rep_point.x.values[0]+.0001},{rep_point.y.values[0]+.0001}', 
-                            'datetime': f'{start_date}/{end_date}',
-                            'limit':5000
-                        }
-            )
-
-            download_items(items, save_folder, bands, grid_image_str, collection)
+        download_items(items, save_folder, bands, grid_image_str, collection)
         
 
 # reproject the bands 
 def reproject_bands(files, save_folder, proj4 = '"+proj=aea +lat_0=-12 +lon_0=-54 +lat_1=-2 +lat_2=-22 +x_0=5000000 +y_0=10000000 +ellps=GRS80 +units=m +no_defs +type=crs"', nodata = -9999):
+    """
+    Reprojects tif files according to a give proj4.
+
+    Parameters
+    ----------
+    files: list of strings
+        List containing the paths of the tif files to be reprojected.
+    save_folder: string
+        Path to the folder where the reprojected images must be saved.
+    proj4: string, optional
+        The target projection to be used. To be inserted in the proj4 format.
+        It defaults to the ALbers Equal Area projection used by the IBGE
+        for the whole Brazilian territory.
+    nodata: int, optional
+        The 'no data' value for the files.
+    """
+    
     print('- Reprojecting Bands -', flush=True)
         
     # iterate and reproject bands
@@ -517,6 +650,40 @@ def reproject_bands(files, save_folder, proj4 = '"+proj=aea +lat_0=-12 +lon_0=-5
         
 # creates a mosaic with reprojected bands
 def mosaic_bands(bands_folder, save_folder, bands, start_date, end_date, interval, date_charsinterval_in_bandnames, nodata=-9999):
+    """
+    Mosaic bands.
+
+    Parameters
+    ----------
+    bands_folder: string
+        Path to the folder that contains the tif bands to be mosaiced.
+    save_folder: string
+        Path to the folder where the mosaics must be saved.
+    bands: list of strings
+        Bands to mosaic. 
+        Ex.: ['sr_band2', 'sr_band3', 'sr_band4', 'sr_band5'] for Landsat-8
+        surface reflectance, ['B02', 'B03', 'B04', 'B08'] for Sentinel-2 
+        surface reflectance, and ['B2', 'B3', 'B4', 'B5'] for Landsat-8 digital
+        number.
+    start_date: string
+        Start date for the mosaics creation. The date must be inserted in the
+        following format: 'YYYY-MM-DD'.
+    end_date: string
+        End date for the mosaics creation. The date must be inserted in the
+        following format: 'YYYY-MM-DD'.
+    interval: int
+        Time interval in days to mosaic the bands.
+    date_charsinterval_in_bandnames: list of ints, shape [2]
+        The interval in the filename that contain the image acquisition date.
+        Ex.: [17,25]
+    nodata: int, optional
+        The 'no data' value for the files.
+
+    Returns
+    -------
+    None
+    """
+
     print('- Mosaicing Bands -', flush=True)
         
     # starts the dates to be used
@@ -568,6 +735,24 @@ def mosaic_bands(bands_folder, save_folder, bands, start_date, end_date, interva
 
 # crop to shapefile
 def clip_shapefile(files, shapefile, save_folder):
+    """
+    Clip files with given shapefile.
+
+    Parameters
+    ----------
+    files: list of strings
+        A list with the path to the tif files to be clipped.
+    shapefile: string
+        Path to the shapefile used to clip the tif files. This shapefile must
+        be on the same projection as the tif files.
+    save_folder: string
+        Path to the folder where the clipped images must be saved.
+
+    Returns
+    -------
+    None
+    """
+
     print('- Clip with Shapefile -', flush=True)
     
     # iterate through files and crop them with gdal
@@ -581,6 +766,28 @@ def clip_shapefile(files, shapefile, save_folder):
     
 # creates the stack
 def create_stacks(bands_folder, save_folder, bands):
+    """
+    Creates temporal stacks.
+
+    Parameters
+    ----------
+    bands_folder: string
+        Path to the folder that contains the tif bands to be mosaiced.
+    save_folder: string
+        Path to the forder to save the stacks.
+    bands: list of strings
+        Bands used to create the data cube stacks. Each band in the list will
+        have a stack in the final process, inside save_folder. 
+        Ex.: ['sr_band2', 'sr_band3', 'sr_band4', 'sr_band5'] for Landsat-8
+        surface reflectance, ['B02', 'B03', 'B04', 'B08'] for Sentinel-2 
+        surface reflectance, and ['B2', 'B3', 'B4', 'B5'] for Landsat-8 digital
+        number.
+
+    Returns
+    -------
+    None
+    """
+
     print('- Creating Cubes -', flush=True)
     
     # checks bands_folder's consistency
@@ -614,6 +821,27 @@ def create_stacks(bands_folder, save_folder, bands):
                     
 # creates a list with the dates intervals, used when creating the cubes
 def acquire_dates(start_date, final_date, interval):
+    """
+    Creates a list with the dates intervals, used when creating the cubes.
+
+    Parameters
+    ----------
+    start_date: string
+        Start date for the list. The date must be inserted in the following
+        format: 'YYYY-MM-DD'.
+    end_date: string
+        End date for the list. The date must be inserted in the following
+        format: 'YYYY-MM-DD'.
+    interval: int, optional
+        The interval used to create the list, in days.
+
+    Returns
+    -------
+    dates: list
+        List of date intervals. Each interval has a start and end date, in the
+        datetime format.
+    """
+
     dates = []
     
     end_date = start_date + datetime.timedelta(days=interval)
@@ -629,6 +857,18 @@ def acquire_dates(start_date, final_date, interval):
 
 # update metadata
 def update_metadata(save_folder = '.'):
+    """
+    Downloads the metadata of the images in Google Cloud Storage.
+
+    Parameters
+    ----------
+    save_folder: string
+        Path of the folder to save the metadata files.
+
+    Returns
+    -------
+    None
+    """
     
     # downloads the data from google cloud
     command = f'gsutil -m cp -R gs://gcp-public-data-sentinel-2/index.csv.gz {save_folder}'
