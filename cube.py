@@ -722,7 +722,7 @@ def mosaic_bands(bands_folder, save_folder, bands, start_date, end_date, interva
             subprocess.call(command, shell=True)
 
             # translate vrt to tif
-            translate_path = os.path.join(save_folder,f'/S{start_date.strftime("%Y%m%d")}-E{end_date.strftime("%Y%m%d")}_{band}.tif')
+            translate_path = os.path.join(save_folder,f'S{start_date.strftime("%Y%m%d")}-E{end_date.strftime("%Y%m%d")}_{band}.tif')
             command = f'gdal_translate -co BIGTIFF=YES -co COMPRESS=PACKBITS -of GTiff {vrt_path} {translate_path}'
             subprocess.call(command, shell=True)
             
