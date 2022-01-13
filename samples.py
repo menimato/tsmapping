@@ -1,7 +1,7 @@
 from binascii import Error
 from datetime import datetime
+from random import sample
 import numpy as np
-from numpy.core.fromnumeric import size
 import rasterio as r
 import geopandas as gpd
 import os
@@ -13,7 +13,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import SimpleDocTemplate
 from reportlab.lib import colors
 
-def select_samples_LSTM(shapefile, stacks_paths, reference_attribute_name, save_folder, samples_amount=None, save_samples_location=False, divide10000=True, plot_map=False):
+def select_samples_LSTM(shapefile, stacks_paths, reference_attribute_name, save_folder, samples_amount=None, save_samples_location=False, divide10000=True, plot_map=False, selection_mode='random'):
     """
     Creates the training samples to be used by the LSTM. A shapefile with the
     reference in points or polygons can be used.
@@ -44,6 +44,9 @@ def select_samples_LSTM(shapefile, stacks_paths, reference_attribute_name, save_
     plot_map: bool, optional
         Wether or not to plot a figure showing where the samples selected are
         laid over the data cube stacks. False by default.
+    selection_mode: string, optional
+        The strategy to use when selecting the samples. Possible values are
+        'random' and 'balanced'.
 
     Returns
     -------
@@ -104,6 +107,7 @@ def select_samples_LSTM(shapefile, stacks_paths, reference_attribute_name, save_
         print('retrieving all possible samples...')
         # retrieving all possible coordinates
         possible_ind = np.transpose(np.asarray(np.where(ref_raster!=-1)))
+        ref = ref_raster[possible_ind[:,0], possible_ind[:,1]]
 
         # removing auxiliary files
         if os.path.exists(os.path.join(save_folder, 'reprojected_reference.shp')):
@@ -121,8 +125,8 @@ def select_samples_LSTM(shapefile, stacks_paths, reference_attribute_name, save_
     else:
         raise FileExistsError('The shapefile exists, but it must be uniquely composed of Points or Polygons.')
 
-    print('selecting samples...')
     # verify if samples_amount is correctly given
+    print('selecting samples...')
     if samples_amount==None:
         samples_amount = len(possible_ind)
     if type(samples_amount)!=int:
@@ -132,17 +136,46 @@ def select_samples_LSTM(shapefile, stacks_paths, reference_attribute_name, save_
             raise ValueError('samples_amount must be a value greater than 0.')
         elif samples_amount>len(possible_ind):
             raise Error(f'samples_amount is larger than the highest number of possible unique samples. In this case samples_amount must be lower than {len(possible_ind)}.')
-        ids = np.random.default_rng().choice(len(possible_ind), size=samples_amount, replace=False)
-        samples_ind = possible_ind[ids,:]
+        
+        # checks if selection mode is given correctly
+        print(f'Strategy to choose samples: {selection_mode}')
+        if not selection_mode.lower() in ['random', 'balanced']:
+            raise Error('selection_mode must be equal to "random" or "balanced".')
+        # in case the 'random' strategy was chosen
+        elif selection_mode.lower() == 'random':
+            ids = np.random.default_rng().choice(len(possible_ind), size=samples_amount, replace=False)
+            samples_ind = possible_ind[ids,:]
+            ref = ref[ids]
+        elif selection_mode.lower() == 'balanced':
+            # getting the number of samples per class
+            samples_per_class = int(samples_amount/len(u))
+            # checking if it is possible
+            count = []
+            for i in range(len(u)):
+                count.append(np.sum(ref==i))
+            count = np.asarray(count)
+            is_possible = np.sum(count>=samples_per_class)==len(u)
+            
+            # if not possible, change the number of samples per class to the maximum possible amount
+            if not is_possible:
+                if np.min(count)==0:
+                    raise Error(f'The class {u[np.where(count==0)[0][0]]} has 0 available entries, os it is impossible to use selection_mode="balanced".')
+                print(f'WARNING: Balancing not possible with given samples_amount. Switching to the maximum amount of samples possible without breaking the balancing, which is {np.min(count)*len(u)} samples.')
+                samples_per_class = np.min(count)
 
-    print('retrieving reference for samples')
-    # retrieving ref for each sample
-    if shp.geom_type[0]=='Point':
-        ref = ref[ids]
-    elif shp.geom_type[0]=='Polygon':
-        ref = (samples_ind[:,0]*0)-1
-        for i in range(len(samples_ind)):
-            ref[i] = ref_raster[samples_ind[i,0],samples_ind[i,1]]
+            # selecting the samples
+            samples_ind = np.zeros([samples_per_class*len(u),2], dtype=int)
+            samples_ref = np.zeros([samples_per_class*len(u)], dtype=int)
+            for i in range(len(u)):
+                ids = np.random.default_rng().choice(np.sum(ref==i), size=samples_per_class, replace=False)
+                samples_ind[i*samples_per_class:(i+1)*samples_per_class] = np.asarray(possible_ind[ref==i][ids])
+                samples_ref[i*samples_per_class:(i+1)*samples_per_class] = np.asarray([i]*samples_per_class)
+            
+            ref = samples_ref.copy()
+            del samples_ref
+
+            # shuffling samples since they are organized by class
+            samples_ind, ref = shuffle_samples(samples_ind, ref)
 
     # extracting samples from cubes
     print('extracting samples from stacks...')
@@ -152,6 +185,7 @@ def select_samples_LSTM(shapefile, stacks_paths, reference_attribute_name, save_
 
         for i in range(len(samples_ind)):
             samples[i,:,stack_ind] = np.squeeze(stack.read(window=r.windows.Window(samples_ind[i,1],samples_ind[i,0],1,1)))
+    print(f'{len(samples)} samples extracted!')
 
     # optional saving samples location
     if save_samples_location:
