@@ -13,8 +13,46 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import SimpleDocTemplate
 from reportlab.lib import colors
 
-def select_samples_LSTM(shapefile, stacks_paths, reference_attribute_name, save_folder, samples_amount=None, divide10000=True, plot_map=False):
+def select_samples_LSTM(shapefile, stacks_paths, reference_attribute_name, save_folder, samples_amount=None, save_samples_location=False, divide10000=True, plot_map=False):
+    """
+    Creates the training samples to be used by the LSTM. A shapefile with the
+    reference in points or polygons can be used.
+    
+    Parameters
+    ----------
+    shapefile: string
+        The path to the shapefile with the reference. It can contain points or 
+        polygons in a known EPSG. It must not contain reference outside the
+        used data cube stacks or in areas with 'no data' in them.
+    stacks_paths: list of strings
+        A list with the paths of the stacks, from which the time series data
+        are extracted to create the samples. Their order represent the order
+        the time series are aranged in the samples.
+    reference_attribute_name: string
+        Name of the attibute that contains the name of the class represented
+        in the reference shapefile.
+    save_folder: string
+        Path to the folder used to storage the samples created.
+    samples_amount: int or None, optional
+        Number of samples to be selected. If None is given, then the maximum
+        possible amount of unique samples is created. None is given by default.
+    save_samples_location: bool, optional
+        Wether or not to save the samples location in a points shapefile. False
+        by default.
+    divide10000: bool, optional
+        Wether or not to divide the  series by 10,000. True by default.
+    plot_map: bool, optional
+        Wether or not to plot a figure showing where the samples selected are
+        laid over the data cube stacks. False by default.
+
+    Returns
+    -------
+    None
+    """
+
+    # gets current time to create the samples id
     now = datetime.now()
+
     print('reading files and preparing for samples selection...')
     # load the samples vector reference
     shp = gpd.read_file(shapefile)
@@ -115,6 +153,19 @@ def select_samples_LSTM(shapefile, stacks_paths, reference_attribute_name, save_
         for i in range(len(samples_ind)):
             samples[i,:,stack_ind] = np.squeeze(stack.read(window=r.windows.Window(samples_ind[i,1],samples_ind[i,0],1,1)))
 
+    # optional saving samples location
+    if save_samples_location:
+        print('saving the location of each sample...')
+        xy = np.asarray(r.transform.xy(transform=stack.transform, rows=samples_ind[:,0], cols=samples_ind[:,1]))
+        df = gpd.GeoDataFrame({'class_num':ref})
+        df[reference_attribute_name] = df.apply(lambda row: u[row.class_num], axis=1)
+        df['x'] = xy[0,:]
+        df['y'] = xy[1,:]
+        df = gpd.GeoDataFrame(df, 
+                              geometry=gpd.points_from_xy(df.x, df.y))
+        df = df.set_crs(crs=stack.crs.to_dict())
+        df.to_file(os.path.join(save_folder, f'{now.strftime("%Y-%m-%d_%H-%M-%S")}_samples_location.shp'))
+
     # optional dividing by 10000
     if divide10000:
         print('dividing by 10,000...')
@@ -153,6 +204,10 @@ def select_samples_LSTM(shapefile, stacks_paths, reference_attribute_name, save_
         for i in u2:
             plt.plot(samples_ind[ref==i,1], samples_ind[ref==i,0], 'o', label=u[i])
         plt.legend()
+        plt.title('Samples Location', fontweight='bold', size=18)
+        plt.xlabel('Columns')
+        plt.ylabel('Rows')
+        plt.tight_layout()
         plt.show()
 
     # create pdf report about samples
@@ -277,11 +332,10 @@ def select_samples_LSTM(shapefile, stacks_paths, reference_attribute_name, save_
     im2 = reportlab.platypus.Image(image_buffer3, 15*reportlab.lib.units.cm, 7.5*reportlab.lib.units.cm)
     Story.append(im2)
 
-    # This command will actually build the PDF
+    # builds the PDF
     doc.build(Story)
 
-    # should close open buffers, can use a "with" statement in python to do this for you
-    # if that works better
+    # close open buffers
     image_buffer1.close()
     image_buffer2.close()
     image_buffer3.close()
@@ -294,5 +348,22 @@ def select_samples_ConvLSTM():
 
 #####################3
 def shuffle_samples(samples, ref):
+    '''
+    Shuffles the samples and their reference, without mismatching them.
+
+    Parameters
+    ----------
+    samples: numpy array
+        Samples array.
+    ref: numpy array.
+        Reference array
+
+    Return
+    ------
+    samples: numpy array
+        Shuffled samples.
+    ref: numpy array
+        Shuffled reference.
+    '''
     inds = np.random.default_rng().choice(len(ref), size=len(ref), replace=False)
     return samples[inds], ref[inds]
