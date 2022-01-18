@@ -12,6 +12,7 @@ import reportlab
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import SimpleDocTemplate
 from reportlab.lib import colors
+from matplotlib.patches import Rectangle
 
 def select_samples_LSTM(shapefile, stacks_paths, reference_attribute_name, save_folder, samples_amount=None, save_samples_location=False, divide10000=True, plot_map=False, selection_mode='random'):
     """
@@ -81,7 +82,7 @@ def select_samples_LSTM(shapefile, stacks_paths, reference_attribute_name, save_
         possible_ind = np.transpose(np.asarray(r.transform.rowcol(transform=stack.transform, xs=shp['geometry'].x, ys=shp['geometry'].y)))
 
     # if geometry is polygon
-    elif shp.geom_type[0]=='Polygon':
+    elif shp.geom_type[0]=='Polygon' or shp.geom_type[0]=='MultiPolygon':
 
         print('rasterizing polygons...')
         # rasterizes the reference
@@ -377,8 +378,175 @@ def select_samples_LSTM(shapefile, stacks_paths, reference_attribute_name, save_
     # done
     print('DONE!')
 
-def select_samples_ConvLSTM():
-    pass
+def select_samples_ConvLSTM(shapefile, stacks_paths, reference_attribute_name, save_folder, samples_amount, sample_size, save_samples_location=False, divide10000=True, plot_map=False, selection_mode='random'):
+    # gets current time to create the samples id
+    now = datetime.now()
+
+    print('reading files and preparing for samples selection...')
+    # load the samples vector reference
+    shp = gpd.read_file(shapefile)
+
+    # load first stack
+    stack = r.open(stacks_paths[0])
+
+    # reproject vector reference to match stack
+    shp = shp.to_crs(stack.crs.to_dict())
+
+    # converting reference to int with the numbers following each other
+    u = np.unique(shp[reference_attribute_name].values)
+    ref = shp[reference_attribute_name].values
+    for i in range(len(u)):
+        ref[ref==u[i]] = i
+    ref = np.asarray(ref)
+
+    # if geometry is not polygon
+    if shp.geom_type[0]!='Polygon' and shp.geom_type[0]!='MultiPolygon':
+        raise FileExistsError('The shapefile exists, but it must be uniquely composed of Points or Polygons.')
+
+    # rasterizes the reference
+    print('rasterizing polygons...')
+    shp['class_num'] = ref
+    shp.to_file(os.path.join(save_folder, 'reprojected_reference.shp'))
+    command = ['gdal_rasterize',
+                '-a class_num',
+                f'-ts {stack.width}.0 {stack.height}.0',
+                '-init -1.0',
+                '-a_nodata -1.0',
+                f'-te {stack.bounds.left} {stack.bounds.bottom} {stack.bounds.right} {stack.bounds.top}',
+                '-ot Int16',
+                '-of GTiff',
+                '-co COMPRESS=PACKBITS',
+                os.path.join(save_folder, 'reprojected_reference.shp'),
+                os.path.join(save_folder, 'rasterized_reference.tif')]
+    command = ' '.join(command)
+    subprocess.call(command, shell=True)
+    
+    # opening rasterized array
+    ref_raster = r.open(os.path.join(save_folder, 'rasterized_reference.tif')).read(1)
+
+    # removing auxiliary files
+    if os.path.exists(os.path.join(save_folder, 'reprojected_reference.shp')):
+        os.remove(os.path.join(save_folder, 'reprojected_reference.shp'))
+    if os.path.exists(os.path.join(save_folder, 'reprojected_reference.cpg')):
+        os.remove(os.path.join(save_folder, 'reprojected_reference.cpg'))
+    if os.path.exists(os.path.join(save_folder, 'reprojected_reference.dbf')):
+        os.remove(os.path.join(save_folder, 'reprojected_reference.dbf'))
+    if os.path.exists(os.path.join(save_folder, 'reprojected_reference.prj')):
+        os.remove(os.path.join(save_folder, 'reprojected_reference.prj'))
+    if os.path.exists(os.path.join(save_folder, 'reprojected_reference.shx')):
+        os.remove(os.path.join(save_folder, 'reprojected_reference.shx'))
+    if os.path.exists(os.path.join(save_folder, 'rasterized_reference.tif')):
+        os.remove(os.path.join(save_folder, 'rasterized_reference.tif'))
+
+    # samples per class
+    samples_per_class = int(samples_amount/len(u))
+
+    # check if there are enough pixels to create samples from...
+    print('testing if there are enough samples origins...')
+    for class_id in range(len(u)):
+        class_count = np.sum(ref_raster==class_id)
+        if class_count<samples_per_class:
+            if class_count==0:
+                raise Error(f'The class {u[class_id]} has no area to be used as reference. Please check in your shapefile reference if this class is within the stack area or if this class is well represented.')
+            print(f'Class {u[class_id]} did not pass. Changing number of samples per class to {class_count}...')
+            samples_per_class = class_count
+
+    samples_amount = samples_per_class*len(u)
+
+    # getting origin of samples
+    print('getting the samples origins...')
+    origins = []
+    for class_id in range(len(u)):
+        row_col = np.transpose(np.asarray(np.where(ref_raster==class_id)))
+        np.random.shuffle(row_col)
+        
+        ind_aux = 0
+        for i in range(samples_per_class):
+            not_found = True
+            while not_found:
+                if ind_aux==len(row_col):
+                    raise Error(f'Reference for the class "{u[class_id]}" is too small given the amount of samples required.')
+                ref_ = ref_raster[row_col[ind_aux,0]-int(sample_size/2):row_col[ind_aux,0]+int(sample_size/2), row_col[ind_aux,1]-int(sample_size/2):row_col[ind_aux,1]+int(sample_size/2)]
+                if ref_.shape==(sample_size,sample_size) and np.sum(ref_==-1)==0:
+                    origins.append(row_col[ind_aux])
+                    not_found = False
+                ind_aux += 1
+
+    del row_col
+    origins = np.asarray(origins)
+    np.random.shuffle(origins)
+
+    # optional plotting of the samples location
+    if plot_map:
+        plt.figure(figsize=(20,20))
+        plt.imshow(ref_raster, cmap='summer', interpolation='nearest')
+        currentAxis = plt.gca()
+        colors = [(ii,jj,kk) for ii,jj,kk in np.random.rand(len(u),3)]
+        for ii in range(len(u)):
+            for i,j in origins[ii*samples_per_class:(ii+1)*samples_per_class]:
+                currentAxis.add_patch(Rectangle((j-(sample_size/2), i-(sample_size/2)), sample_size, sample_size, fill=colors[ii], alpha=.5, color=colors[ii]))
+        
+            plt.plot([-1,-1], [-1,-1], color=colors[ii], label=u[ii])
+        plt.legend()
+
+        plt.xlim(0, ref_raster.shape[1])
+        plt.ylim(ref_raster.shape[0],0)
+
+        plt.title('Samples Location', fontweight='bold', size=18)
+
+        plt.tight_layout()
+        
+        plt.legend()
+        plt.show()
+
+    # extracting samples from the cubes
+    print('extracting samples from stacks...')
+    samples = np.zeros([samples_amount, stack.count, sample_size, sample_size, len(stacks_paths)], dtype=int)
+    for i in range(len(stacks_paths)):
+        stack = r.open(stacks_paths[i])
+        for j in range(len(origins)):
+            samples[j,:,:,:,i] = stack.read(window=r.windows.Window(origins[j,1]-int(sample_size/2), origins[j,0]-int(sample_size/2), sample_size, sample_size))
+    
+    # collecting reference
+    reference = np.zeros([samples_amount, sample_size, sample_size], dtype=int)
+    for i in range(len(origins)):
+        reference[i] = ref_raster[origins[i,0]-int(sample_size/2):origins[i,0]+int(sample_size/2), origins[i,1]-int(sample_size/2):origins[i,1]+int(sample_size/2)]
+    
+    print(f'{len(samples)} samples extracted!')
+
+    # printing log
+    # printing the proportion of each class
+    u2,c = np.unique(reference, return_counts=True)
+    u2 = np.asarray(u2)
+    c = np.asarray(c)
+    percentage = c*100/np.sum(c)
+
+    text_log = ''
+    text_log += '---------------------------------------------------------\nCLASSES REFERENCE\n---------------------------------------------------------\n'
+    text_log += 'ID\tPROPORTION\tCLASS NAME\n'
+    for i in range(len(u)):
+        if i in u2:
+            text_log += f'{i}\t{"%.1f" % percentage[np.where(u2==i)][0]}%\t\t{u[i]}\n'
+        else:
+            text_log += f'{i}\t{"%.1f" % 0}%\t\t{u[i]}\n'
+    text_log += '---------------------------------------------------------'
+
+    print(text_log)
+
+    # optional divide by 10,000
+    print('dividing by 10,000...')
+    if divide10000:
+        samples = np.asarray(samples, dtype=np.float32)/10000
+
+    # saving the samples
+    print('saving samples...')
+    np.save(os.path.join(save_folder, f'{now.strftime("%Y-%m-%d_%H-%M-%S")}_samples.npy'), samples)
+    np.save(os.path.join(save_folder, f'{now.strftime("%Y-%m-%d_%H-%M-%S")}_reference.npy'), reference)
+    print(f'saved in: {save_folder}')
+
+    print('DONE!')
+
+
 
 #####################3
 def shuffle_samples(samples, ref):
