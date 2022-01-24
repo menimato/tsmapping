@@ -19,39 +19,28 @@ import numpy as np
 import datetime
 import stac
 import time
-import shapely.geometry
-from shapely import wkt as wkt_
-from rasterio.warp import calculate_default_transform, reproject, Resampling
+import rasterio as r
 
 # absolute path
 package_directory = os.path.dirname(os.path.abspath(__file__))
 
 # to be used when downloading from google cloud
-predefined_tiles = {'caatinga': {'number of paths': 5,
-                                 'paths': {'path 1': {'key tile': '23LNL',
-                                                           'tiles': ['23LNG','23LNH','23LNJ','23LNK','23LNL','23LPK','23LPL','23MPM']},
-                                                'path 2': {'key tile': '23LQL',
-                                                           'tiles': ['23KPB', '23LMC', '23LNC', '23LND', '23LNE', '23LNF', '23LNG', '23LNH', '23LPC', '23LPD', 
-                                                                        '23LPE', '23LPF', '23LPG', '23LPH', '23LPJ', '23LPK', '23LPL', '23LQC', '23LQD', '23LQE', 
-                                                                        '23LQF', '23LQG', '23LQH', '23LQJ', '23LQK', '23LQL', '23LRG', '23LRH', '23LRJ', '23LRK', 
-                                                                        '23LRL', '23MPM', '23MQM', '23MQN', '23MRM', '23MRN', '23MRR', '23MRS', '24LTR', '24MTA', 
-                                                                        '24MTB', '24MTS', '24MTT', '24MTU', '24MTV', '24MUA', '24MUB', '24MUU', '24MUV']},
-                                                'path 3': {'key tile': '24LUP',
-                                                           'tiles': ['23LQD', '23LQE', '23LRD', '23LRE', '23LRF', '23LRG', '23LRH', '24LTJ', '24LTK', '24LTL', 
-                                                                        '24LTM', '24LTN', '24LTP', '24LTQ', '24LTR', '24LUJ', '24LUK', '24LUL', '24LUM', '24LUN', 
-                                                                        '24LUP', '24LUQ', '24LUR', '24LVL', '24LVM', '24LVN', '24LVP', '24LVQ', '24LVR', '24LWQ', 
-                                                                        '24LWR', '24MTS', '24MUA', '24MUB', '24MUS', '24MUT', '24MUU', '24MUV', '24MVA', '24MVB', 
-                                                                        '24MVS', '24MVT', '24MVU', '24MVV', '24MWA', '24MWB', '24MWS', '24MWT', '24MWU', '24MWV', 
-                                                                        '24MXA', '24MXV']},
-                                                'path 4': {'key tile': '24MYT',
-                                                           'tiles': ['24LVM', '24LVN', '24LVP', '24LWM', '24LWN', '24LWP', '24LWQ', '24LWR', '24LXN', '24LXP', 
-                                                                        '24LXQ', '24LXR', '24LYP', '24LYQ', '24LYR', '24LZR', '24MWS', '24MWT', '24MXS', '24MXT', 
-                                                                        '24MXU', '24MXV', '24MYS', '24MYT', '24MYU', '24MYV', '24MZS', '24MZT', '24MZU', '24MZV']},
-                                                'path 5': {'key tile': '25LBL',
-                                                           'tiles': ['24LZR', '24MZS', '25MBM', '25MBN', '25MBP']}
-                                          }
-                                }
-                   }
+predefined_tiles = {'semiarido':{'key tiles':['23LMJ', '23LQJ', '24LUP', '24LXQ', '25LBL'],
+                                'tiles':['23KLB','23KMA','23KMB','23KNA','23KNB','23KPB','23KQA','23KQB','23KRA','23KRB','23LLD',
+                                         '23LLG','23LLH','23LLJ','23LMC','23LMD','23LME','23LMG','23LMH','23LMJ','23LMK','23LML',
+                                         '23LNC','23LND','23LNE','23LNF','23LNG','23LNH','23LNJ','23LNK','23LNL','23LPC','23LPD',
+                                         '23LPE','23LPF','23LPG','23LPH','23LPJ','23LPK','23LPL','23LQC','23LQD','23LQE','23LQF',
+                                         '23LQG','23LQH','23LQJ','23LQK','23LQL','23LRC','23LRD','23LRE','23LRF','23LRG','23LRH',
+                                         '23LRJ','23LRK','23LRL','23MNM','23MNN','23MPM','23MPN','23MPQ','23MQM','23MQN','23MQP',
+                                         '23MQQ','23MQR','23MQS','23MQT','23MRM','23MRN','23MRP','23MRQ','23MRR','23MRS','23MRT',
+                                         '24KTF','24KTG','24KUG','24KVG','24LTH','24LTJ','24LTK','24LTL','24LTM','24LTN','24LTP',
+                                         '24LTQ','24LTR','24LUH','24LUJ','24LUK','24LUL','24LUM','24LUN','24LUP','24LUQ','24LUR',
+                                         '24LVH','24LVJ','24LVK','24LVL','24LVM','24LVN','24LVP','24LVQ','24LVR','24LWM','24LWN',
+                                         '24LWP','24LWQ','24LWR','24LXN','24LXP','24LXQ','24LXR','24LYP','24LYQ','24LYR','24LZQ',
+                                         '24LZR','24MTA','24MTB','24MTS','24MTT','24MTU','24MTV','24MUA','24MUB','24MUC','24MUS',
+                                         '24MUT','24MUU','24MUV','24MVA','24MVB','24MVS','24MVT','24MVU','24MVV','24MWA','24MWB',
+                                         '24MWS','24MWT','24MWU','24MWV','24MXA','24MXS','24MXT','24MXU','24MXV','24MYS','24MYT',
+                                         '24MYU','24MYV','24MZS','24MZT','24MZU','24MZV','25LBL','25MBM','25MBN','25MBP','25MBQ']}}
 
 # to be used when downloading from Brazil Data Cube
 predefined_paths_rows = {'caatinga': [[214, 64], [214, 65], [214, 66], [214, 67], [219, 62], [219, 63], [219, 64], [219, 65], [219, 66], [219, 67], [219, 68],
@@ -86,21 +75,17 @@ def create_cubes_gcloudSentinel(save_folder, bands, start_date, end_date, metada
     metadata_path: string
         Path to the metadata file downloaded with tsmapping.cube.update_metadata().
         Filename included. 
-    tiles: dict
+    tiles: dict, optional
         This variable must follow the model presented in 
-        tsmapping.cube.predefined_tile['caatinga']. 'number of paths' is the
-        number of Sentinel-2 paths that intersect the study area, and inside
-        'paths' there must exist the same amount of 'path n' starting with n=1 
-        until n='number of paths'. Each 'path n' must have a 'key tile' and 
-        'tiles'. 'key tile' is a tile that is not within any other 
-        Sentinel-2 path, but the one represented by 'path n'. It is used to 
-        acquire the image dates referent to the path being described. 'tiles'
-        is the tiles to donwload and create the data cube stacks. 'tiles' does 
-        not have to contain 'key tile'.
-        Ex.: {'number of paths': 1,
-              'paths': {'path 1': {'key tile': '24LTK',
-                                  'tiles': ['24LTL', '24LUK']}}}
-        Obs.: To find 'key tile' and 'tiles' the files under tsmapping.aux can
+        tsmapping.cube.predefined_tile['semiarido']. 'tiles' is is a list of
+        tiles that interset the study area. 'key tiles' is a list of tiles,
+        where one tile exist for each Sentinel-2 acquisition path. The 'key
+        tiles' are used to acquire the date of each Sentinel-2 acquisition date
+        and must be at the center of the path, not overlapping with other paths.
+        Key tiles can be outside of the 'tiles' list.
+        Ex.: {'key tiles': ['24MVT', '24MYT'],
+              'tiles': ['24MWT', '24MWS', '24MXT', '24MXS']}
+        Obs.: To find 'key tiles' and 'tiles' the files under tsmapping.aux can
         be used.
     delete_auxiliary: bool, optional
         Wheter to delete intermediate files used to create the cube, like 
@@ -362,7 +347,7 @@ def create_cubes_BDC(save_folder, bands, access_token, start_date, end_date, del
     
 
 # download images from google cloud
-def download_images_gcloud(save_folder, metadata_path, bands, start_date, end_date, tiles=predefined_tiles['caatinga'], interval=5):
+def download_images_gcloud(save_folder, metadata_path, bands, start_date, end_date, tiles=predefined_tiles['semiarido'], interval=5):
     """
     Downloads images directly from Google Cloud Storage.
 
@@ -383,20 +368,15 @@ def download_images_gcloud(save_folder, metadata_path, bands, start_date, end_da
         the following format: 'YYYY-MM-DD'.
     tiles: dict, optional
         This variable must follow the model presented in 
-        tsmapping.cube.predefined_tile['caatinga']. 'number of paths' is the
-        number of Sentinel-2 paths that intersect the study area, and inside
-        'paths' there must exist the same amount of 'path n' starting with n=1 
-        until n='number of paths'. Each 'path n' must have a 'key tile' and 
-        'tiles'. 'key tile' is a tile that is not within any other 
-        Sentinel-2 path, but the one represented by 'path n'. It is used to 
-        acquire the image dates referent to the path being described. 'tiles'
-        is the tiles to donwload and create the data cube stacks. 'tiles' does 
-        not have to contain 'key tile'. It defaults to donwloading all Caatinga
-        tiles.
-        Ex.: {'number of paths': 1,
-              'paths': {'path 1': {'key tile': '24LTK',
-                                  'tiles': ['24LTL', '24LUK']}}}
-        Obs.: To find 'key tile' and 'tiles' the files under tsmapping.aux can
+        tsmapping.cube.predefined_tile['semiarido']. 'tiles' is is a list of
+        tiles that interset the study area. 'key tiles' is a list of tiles,
+        where one tile exist for each Sentinel-2 acquisition path. The 'key
+        tiles' are used to acquire the date of each Sentinel-2 acquisition date
+        and must be at the center of the path, not overlapping with other paths.
+        Key tiles can be outside of the 'tiles' list.
+        Ex.: {'key tiles': ['24MVT', '24MYT'],
+              'tiles': ['24MWT', '24MWS', '24MXT', '24MXS']}
+        Obs.: To find 'key tiles' and 'tiles' the files under tsmapping.aux can
         be used.
     interval: int
         Time interval in days to search for bands. In case more than one image
@@ -413,9 +393,8 @@ def download_images_gcloud(save_folder, metadata_path, bands, start_date, end_da
     
     # creates list with the tiles of interest to download
     tiles_filter = []
-    for i in range(1, tiles['number of paths']+1, 1):
-        tiles_filter.extend([tiles['paths'][f'path {i}']['key tile']])
-        tiles_filter.extend( tiles['paths'][f'path {i}']['tiles'])
+    tiles_filter.extend(tiles['tiles'])
+    tiles_filter.extend(tiles['key tiles'])
     
     # read the metadata in chunks
     chunksize = 10 ** 6
@@ -438,11 +417,11 @@ def download_images_gcloud(save_folder, metadata_path, bands, start_date, end_da
     
     # iterates through the paths and tiles
     print('Downloading...', flush=True)
-    for path in range(1, tiles['number of paths']+1, 1):
+    for path in range(1, len(tiles['key tiles'])+1, 1):
         print(f'Path:{path}\n----------', flush=True)
 
-        # getting the dates from the jey tile
-        key_tile_df = df[(df['MGRS_TILE'] == tiles['paths'][f'path {path}']['key tile']) & 
+        # getting the dates from the key tile
+        key_tile_df = df[(df['MGRS_TILE'] == tiles['key tiles'][path-1]) & 
                          ((df['SENSING_TIME']>=str(start_date)) & 
                           (df['SENSING_TIME']<str(final_date)))].copy()
         # creates the SENSING_DATE field, because SENSING_TIME has different values even for images in the same day
@@ -456,7 +435,7 @@ def download_images_gcloud(save_folder, metadata_path, bands, start_date, end_da
         key_tile_df.drop_duplicates(subset=['SENSING_DATE'], inplace=True, keep='last')
 
         # iterates through tiles in the path
-        for tile in tqdm(tiles['paths'][f'path {path}']['tiles']):
+        for tile in tqdm(tiles['tiles']):
             # iterating through the dates
             for [start_date, end_date] in dates:
                 # search for scenes of interest
@@ -485,7 +464,8 @@ def download_images_gcloud(save_folder, metadata_path, bands, start_date, end_da
                             subprocess.call(command, shell=True)
                 else:
                     # spit error
-                    print(f'Tile {tile} did not have any candidate images between {start_date} and {end_date}.')
+                    # print(f'Tile {tile} did not have any candidate images between {start_date} and {end_date}.')
+                    pass
     
     # final statement   
     print('Download finished!\n')
@@ -743,8 +723,7 @@ def clip_shapefile(files, shapefile, save_folder):
     files: list of strings
         A list with the path to the tif files to be clipped.
     shapefile: string
-        Path to the shapefile used to clip the tif files. This shapefile must
-        be on the same projection as the tif files.
+        Path to the shapefile used to clip the tif files.
     save_folder: string
         Path to the folder where the clipped images must be saved.
 
@@ -754,12 +733,30 @@ def clip_shapefile(files, shapefile, save_folder):
     """
 
     print('- Clip with Shapefile -', flush=True)
+
+    # reproject shapefile to the same crs as the mosaics
+    shp = gpd.read_file(shapefile)
+    mosaic = r.open(files[0])
+    shp.to_crs(mosaic.crs.to_dict())
+    shp.to_file(os.path.join(save_folder, 'reprojected_shapefile.shp'))
     
     # iterate through files and crop them with gdal
     for file in tqdm(files):
-        command = f'gdalwarp -co BIGTIFF=YES -co COMPRESS=PACKBITS -of GTiff -cutline "{shapefile}" -crop_to_cutline "{file}" "{os.path.join(save_folder,file.split("/")[-1])}"'
+        command = f'gdalwarp -co BIGTIFF=YES -co COMPRESS=PACKBITS -of GTiff -cutline "{os.path.join(save_folder, "reprojected_shapefile.shp")}" -crop_to_cutline "{file}" "{os.path.join(save_folder,file.split("/")[-1])}"'
         subprocess.call(command, shell=True)
-        
+    
+    # removing reprojected shapefile
+    if os.path.exists(os.path.join(save_folder, 'reprojected_shapefile.shp')):
+        os.remove(os.path.join(save_folder, 'reprojected_shapefile.shp'))
+    if os.path.exists(os.path.join(save_folder, 'reprojected_shapefile.cpg')):
+        os.remove(os.path.join(save_folder, 'reprojected_shapefile.cpg'))
+    if os.path.exists(os.path.join(save_folder, 'reprojected_shapefile.dbf')):
+        os.remove(os.path.join(save_folder, 'reprojected_shapefile.dbf'))
+    if os.path.exists(os.path.join(save_folder, 'reprojected_shapefile.prj')):
+        os.remove(os.path.join(save_folder, 'reprojected_shapefile.prj'))
+    if os.path.exists(os.path.join(save_folder, 'reprojected_shapefile.shx')):
+        os.remove(os.path.join(save_folder, 'reprojected_shapefile.shx'))
+
     # final statement   
     print('Clipping finished!\n')
     
