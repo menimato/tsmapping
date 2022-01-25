@@ -395,6 +395,7 @@ def download_images_gcloud(save_folder, metadata_path, bands, start_date, end_da
     tiles_filter = []
     tiles_filter.extend(tiles['tiles'])
     tiles_filter.extend(tiles['key tiles'])
+    tiles_filter = np.unique(tiles_filter)
     
     # read the metadata in chunks
     chunksize = 10 ** 6
@@ -417,11 +418,11 @@ def download_images_gcloud(save_folder, metadata_path, bands, start_date, end_da
     
     # iterates through the paths and tiles
     print('Downloading...', flush=True)
-    for path in range(1, len(tiles['key tiles'])+1, 1):
-        print(f'Path:{path}\n----------', flush=True)
+    for key_tile in tiles['key tiles']:
+        print(f'Key tile:{key_tile}\n----------', flush=True)
 
         # getting the dates from the key tile
-        key_tile_df = df[(df['MGRS_TILE'] == tiles['key tiles'][path-1]) & 
+        key_tile_df = df[(df['MGRS_TILE'] == key_tile) & 
                          ((df['SENSING_TIME']>=str(start_date)) & 
                           (df['SENSING_TIME']<str(final_date)))].copy()
         # creates the SENSING_DATE field, because SENSING_TIME has different values even for images in the same day
@@ -437,10 +438,10 @@ def download_images_gcloud(save_folder, metadata_path, bands, start_date, end_da
         # iterates through tiles in the path
         for tile in tqdm(tiles['tiles']):
             # iterating through the dates
-            for [start_date, end_date] in dates:
+            for start_date_, end_date_ in dates:
                 # search for scenes of interest
                 # select from dataframe scenes for the specific tile and time interval
-                sub_df = df[(df['MGRS_TILE'] == tile) & ((df['SENSING_TIME']>=str(start_date)) & (df['SENSING_TIME']<str(end_date)))].copy()
+                sub_df = df[(df['MGRS_TILE'] == tile) & ((df['SENSING_TIME']>=str(start_date_)) & (df['SENSING_TIME']<str(end_date_)))].copy()
                 # creates the SENSING_DATE field, because SENSING_TIME has different values even for images in the same day
                 sensing_dates = []
                 for d in sub_df['SENSING_TIME'].values:
