@@ -711,7 +711,7 @@ def mosaic_bands(bands_folder, save_folder, bands, start_date, end_date, interva
     os.remove(vrt_path)
     
     # final statement   
-    print('Mosaicing finished!\n')
+    print('Mosaicing finished!\n') 
     
 
 # crop to shapefile
