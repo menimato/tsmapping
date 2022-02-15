@@ -14,6 +14,7 @@ from reportlab.platypus import SimpleDocTemplate
 from reportlab.lib import colors
 from matplotlib.patches import Rectangle
 
+
 def select_samples_LSTM(shapefile, stacks_paths, reference_attribute_name, save_folder, samples_amount=None, save_samples_location=False, divide10000=True, plot_map=False, selection_mode='random'):
     """
     Creates the training samples to be used by the LSTM. A shapefile with the
